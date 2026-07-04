@@ -3246,7 +3246,6 @@ body::after {
 
 .sidebar-footer {
   position: relative;
-<<<<<<< HEAD
 }
 
 /* ============================================
@@ -3429,6 +3428,3 @@ body::after {
   0%, 100% { box-shadow: 0 0 10px rgba(255, 171, 64, 0.2); }
   50% { box-shadow: 0 0 22px rgba(255, 171, 64, 0.5); }
 }
-=======
-}
->>>>>>> 05916f04a50d2adcf495790f9a30888ec2d5929f
