@@ -174,6 +174,41 @@ function safeJsonParse(text) {
   return JSON.parse(fenced);
 }
 
+function truncateContextText(text, maxLength = 6000) {
+  const value = String(text || '');
+  if (value.length <= maxLength) return value;
+  return `${value.slice(0, maxLength)}\n[truncated]`;
+}
+
+function buildContextualPrompt(prompt, conversationHistory = [], sharedContext = { facts: [], decisions: [] }) {
+  const blocks = [];
+  const facts = Array.isArray(sharedContext?.facts) ? sharedContext.facts : [];
+  const decisions = Array.isArray(sharedContext?.decisions) ? sharedContext.decisions : [];
+
+  if (facts.length > 0 || decisions.length > 0) {
+    blocks.push([
+      'Known session context:',
+      ...facts.map((fact) => `- Fact: ${fact}`),
+      ...decisions.map((decision) => `- Decision: ${decision}`)
+    ].join('\n'));
+  }
+
+  if (Array.isArray(conversationHistory) && conversationHistory.length > 0) {
+    const recentHistory = conversationHistory.slice(-6).map((entry, idx) => {
+      const response = entry.response || entry.resultSummary || '';
+      return [
+        `Turn ${idx + 1}`,
+        `User: ${truncateContextText(entry.prompt, 1200)}`,
+        response ? `Assistant/model response: ${truncateContextText(response)}` : null
+      ].filter(Boolean).join('\n');
+    });
+    blocks.push(`Conversation transcript for resolving follow-up references:\n${recentHistory.join('\n\n')}`);
+  }
+
+  blocks.push(`Current user request:\n${prompt}`);
+  return blocks.join('\n\n');
+}
+
 async function routeWithOpenAI(model, apiKey, prompt, availableModels) {
   const client = new OpenAI({ apiKey });
   const response = await client.chat.completions.create({
@@ -220,23 +255,7 @@ async function generatePlan(prompt, availableModels, sessionId, conversationHist
     throw new Error('sessionId is required');
   }
 
-  // Build contextual prompt: known context → conversation history → current request
-  let contextualPrompt = prompt;
-
-  // Prepend conversation history if present
-  if (Array.isArray(conversationHistory) && conversationHistory.length > 0) {
-    const recentHistory = conversationHistory.slice(-5);
-    const historyLines = recentHistory.map((entry, idx) =>
-      `Turn ${idx + 1} — user: ${entry.prompt}, summary: ${entry.resultSummary}`
-    );
-    contextualPrompt = `Conversation so far:\n${historyLines.join('\n')}\n\n${contextualPrompt}`;
-  }
-
-  // Prepend known facts if present (placed BEFORE history in final output)
-  const facts = Array.isArray(sharedContext?.facts) ? sharedContext.facts : [];
-  if (facts.length > 0) {
-    contextualPrompt = `Known context:\n${facts.join('\n')}\n\n${contextualPrompt}`;
-  }
+  const contextualPrompt = buildContextualPrompt(prompt, conversationHistory, sharedContext);
 
   const modelIds = normalizeModelIds(availableModels);
   const routingModel = choosePreferredModel(modelIds);
@@ -256,9 +275,10 @@ async function generatePlan(prompt, availableModels, sessionId, conversationHist
     llmPlan = null;
   }
 
-  const normalized = normalizePlan(llmPlan, prompt, modelIds);
+  const normalized = normalizePlan(llmPlan, contextualPrompt, modelIds);
   return {
     ...normalized,
+    userPrompt: prompt,
     routerModel: routingModel
   };
 }

@@ -15,7 +15,16 @@ const router = express.Router();
 const executeSchema = z.object({
   session_id: z.string().uuid(),
   plan_id: z.string().uuid().optional(),
-  plan: z.any().optional()
+  plan: z.any().optional(),
+  conversation_history: z.array(z.object({
+    prompt: z.string(),
+    resultSummary: z.string().optional(),
+    response: z.string().optional()
+  })).optional(),
+  shared_context: z.object({
+    facts: z.array(z.string()).optional(),
+    decisions: z.array(z.string()).optional()
+  }).optional()
 });
 
 function normalizeExecutionResult(planId, plan, result) {
@@ -92,7 +101,7 @@ async function insertExecutionRecord(payload) {
 
 router.post('/', validate(executeSchema), async (req, res, next) => {
   try {
-    const { session_id, plan_id, plan } = req.body;
+    const { session_id, plan_id, plan, conversation_history, shared_context } = req.body;
 
     let resolvedPlan = plan || null;
     let resolvedPlanId = plan_id || (plan && plan.planId) || crypto.randomUUID();
@@ -149,7 +158,13 @@ router.post('/', validate(executeSchema), async (req, res, next) => {
       return res.status(400).json({ error: 'No models available' });
     }
 
-    const result = await executePlan(resolvedPlan, keyMap, availableModels, session_id);
+    const result = await executePlan(resolvedPlan, keyMap, availableModels, session_id, {
+      conversationHistory: conversation_history || [],
+      sharedContext: {
+        facts: shared_context?.facts || [],
+        decisions: shared_context?.decisions || []
+      }
+    });
     const response = normalizeExecutionResult(resolvedPlanId, resolvedPlan, result);
 
     await insertExecutionRecord({

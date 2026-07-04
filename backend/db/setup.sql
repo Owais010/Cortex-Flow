@@ -82,3 +82,44 @@ CREATE TABLE IF NOT EXISTS session_context (
   context JSONB NOT NULL DEFAULT '{"facts":[],"decisions":[]}'::jsonb,
   updated_at TIMESTAMPTZ DEFAULT now()
 );
+
+-- 6. Users — public profile rows used by chat persistence FKs
+CREATE TABLE IF NOT EXISTS users (
+  id UUID PRIMARY KEY,
+  email TEXT NOT NULL,
+  display_name TEXT,
+  avatar_url TEXT,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email
+  ON users(email);
+
+-- 7. Chat Threads — durable conversations shown in the sidebar
+CREATE TABLE IF NOT EXISTS chat_threads (
+  id UUID PRIMARY KEY,
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  title TEXT NOT NULL DEFAULT 'New Chat',
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_chat_threads_user_updated
+  ON chat_threads(user_id, updated_at DESC);
+
+-- 8. Chat Messages — exact user/model messages for each thread
+CREATE TABLE IF NOT EXISTS chat_messages (
+  id UUID PRIMARY KEY,
+  thread_id UUID NOT NULL REFERENCES chat_threads(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  type TEXT NOT NULL CHECK (type IN ('user', 'plan', 'executing', 'result', 'error', 'system')),
+  content JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_chat_messages_user_created
+  ON chat_messages(user_id, created_at ASC);
+
+CREATE INDEX IF NOT EXISTS idx_chat_messages_thread_created
+  ON chat_messages(thread_id, created_at ASC);

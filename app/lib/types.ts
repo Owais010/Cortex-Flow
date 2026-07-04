@@ -198,6 +198,7 @@ export interface Chat {
 export interface ConversationHistoryEntry {
   prompt: string;
   resultSummary: string;
+  response?: string;
 }
 
 export interface SharedContext {

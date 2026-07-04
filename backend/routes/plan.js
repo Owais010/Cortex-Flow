@@ -14,12 +14,21 @@ const router = express.Router();
 const planSchema = z.object({
   session_id: z.string().uuid(),
   prompt: z.string().min(1).max(10000),
-  available_models: z.array(z.string()).optional()
+  available_models: z.array(z.string()).optional(),
+  conversation_history: z.array(z.object({
+    prompt: z.string(),
+    resultSummary: z.string().optional(),
+    response: z.string().optional()
+  })).optional(),
+  shared_context: z.object({
+    facts: z.array(z.string()).optional(),
+    decisions: z.array(z.string()).optional()
+  }).optional()
 });
 
 router.post('/', validate(planSchema), async (req, res, next) => {
   try {
-    const { session_id, prompt, available_models } = req.body;
+    const { session_id, prompt, available_models, conversation_history, shared_context } = req.body;
 
     const availableModels = await getAvailableModels(session_id);
     const availableModelIds = availableModels.map((m) => m.id);
@@ -33,7 +42,16 @@ router.post('/', validate(planSchema), async (req, res, next) => {
       });
     }
 
-    const generated = await generatePlan(prompt, resolvedModelIds, session_id);
+    const generated = await generatePlan(
+      prompt,
+      resolvedModelIds,
+      session_id,
+      conversation_history || [],
+      {
+        facts: shared_context?.facts || [],
+        decisions: shared_context?.decisions || []
+      }
+    );
     const subtasks = generated.subtasks.map((task) => {
       const estimate = estimateTokensAndCost(task.prompt, task.assignedModel);
       return {
@@ -74,6 +92,10 @@ router.post('/', validate(planSchema), async (req, res, next) => {
       sessionId: session_id,
       createdAt: new Date().toISOString()
     };
+
+    if (Array.isArray(generated.memorableFacts) && generated.memorableFacts.length > 0) {
+      plan.memorableFacts = generated.memorableFacts;
+    }
 
     savePlan(plan.planId, plan);
     if (supabase.savePlanVersion) {

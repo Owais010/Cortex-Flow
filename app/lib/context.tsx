@@ -36,7 +36,7 @@ function rowToMessage(row: { id: string; type: string; content: unknown; created
 
 function messageToContent(msg: Message): Record<string, unknown> {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { id: _id, type: _type, timestamp: _ts, ...rest } = msg as Record<string, unknown>;
+  const { id: _id, type: _type, timestamp: _ts, ...rest } = msg as unknown as Record<string, unknown>;
   return rest;
 }
 
@@ -47,6 +47,72 @@ function welcomeMessage(): Message {
     content: "Welcome to Cortex Flow. Describe your task and I'll route it to the best AI models.",
     timestamp: now(),
   } as Message;
+}
+
+function chatUserProfile(user: User): api.ChatUserProfile {
+  return {
+    id: user.id,
+    email: user.email || `${user.id}@cortex-flow.local`,
+    displayName:
+      (user.user_metadata?.full_name as string | undefined) ||
+      (user.user_metadata?.name as string | undefined) ||
+      user.email?.split('@')[0] ||
+      'Cortex Flow User',
+    avatarUrl: (user.user_metadata?.avatar_url as string | undefined) || '',
+  };
+}
+
+function textFromMessage(message: Message): string {
+  if (message.type === 'user' || message.type === 'error' || message.type === 'system') {
+    return message.content;
+  }
+  if (message.type === 'result') {
+    return message.result.finalOutput || message.result.subtaskResults.map(r => r.output).filter(Boolean).join('\n\n');
+  }
+  if (message.type === 'plan') {
+    return `Planned response for: ${message.plan.prompt}`;
+  }
+  return '';
+}
+
+function buildConversationHistory(chat: Chat | undefined, pendingPrompt?: string): ConversationHistoryEntry[] {
+  if (!chat) {
+    return pendingPrompt ? [{ prompt: pendingPrompt, resultSummary: pendingPrompt }] : [];
+  }
+
+  const history: ConversationHistoryEntry[] = [];
+  let lastPrompt: string | null = null;
+
+  for (const message of chat.messages) {
+    if (message.type === 'system' || message.type === 'executing' || message.type === 'plan') continue;
+
+    if (message.type === 'user') {
+      if (lastPrompt) {
+        history.push({ prompt: lastPrompt, resultSummary: lastPrompt });
+      }
+      lastPrompt = message.content;
+      continue;
+    }
+
+    const response = textFromMessage(message);
+    if (lastPrompt && response) {
+      history.push({
+        prompt: lastPrompt,
+        resultSummary: truncate(response, 500),
+        response,
+      });
+      lastPrompt = null;
+    }
+  }
+
+  if (lastPrompt) {
+    history.push({ prompt: lastPrompt, resultSummary: lastPrompt });
+  }
+  if (pendingPrompt) {
+    history.push({ prompt: pendingPrompt, resultSummary: pendingPrompt });
+  }
+
+  return history.slice(-8);
 }
 
 // ─── context type ────────────────────────────────────────────────────────────
@@ -96,7 +162,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
   // stateRef lets callbacks read the latest state without stale closures
   const stateRef = useRef(state);
-  stateRef.current = state;
+  useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
 
   // Track persisted message IDs to skip duplicate INSERTs
   const persistedMsgIds = useRef<Set<string>>(new Set());
@@ -105,24 +173,11 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   // ── Supabase helpers ──────────────────────────────────────────────────────
 
   const supabaseLoadChats = useCallback(async (userId: string): Promise<Chat[] | null> => {
-    const supabase = createClient();
     setIsLoadingChats(true);
     try {
-      const { data: threads, error: tErr } = await supabase
-        .from('chat_threads')
-        .select('*')
-        .eq('user_id', userId)
-        .order('updated_at', { ascending: false });
+      const { threads, messages: msgs } = await api.getChatThreads(userId);
 
-      if (tErr || !threads || threads.length === 0) return null;
-
-      const { data: msgs, error: mErr } = await supabase
-        .from('chat_messages')
-        .select('*')
-        .eq('user_id', userId)
-        .order('created_at', { ascending: true });
-
-      if (mErr) return null;
+      if (!threads || threads.length === 0) return null;
 
       (msgs ?? []).forEach(r => persistedMsgIds.current.add(r.id));
 
@@ -138,59 +193,52 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         createdAt: t.created_at,
         messages: [welcomeMessage(), ...(msgsByThread[t.id] ?? [])],
       }));
+    } catch (err) {
+      console.error('Failed to load persisted chat history:', err);
+      return null;
     } finally {
       setIsLoadingChats(false);
     }
   }, []);
 
   const supabaseCreateThread = useCallback(async (userId: string, threadId: string, title: string) => {
-    const supabase = createClient();
-    await supabase.from('chat_threads').upsert({
-      id: threadId,
-      user_id: userId,
-      title,
-      created_at: now(),
-      updated_at: now(),
-    }, { onConflict: 'id' });
-  }, []);
+    await api.createChatThread(userId, threadId, title, user ? chatUserProfile(user) : undefined);
+  }, [user]);
 
   const supabaseUpdateThreadTitle = useCallback(async (threadId: string, title: string) => {
-    const supabase = createClient();
-    await supabase
-      .from('chat_threads')
-      .update({ title, updated_at: now() })
-      .eq('id', threadId);
+    await api.updateChatThreadTitle(threadId, title);
   }, []);
 
   const supabaseDeleteThread = useCallback(async (threadId: string) => {
-    const supabase = createClient();
-    // cascade via FK deletes messages automatically
-    await supabase.from('chat_threads').delete().eq('id', threadId);
+    await api.deleteChatThread(threadId);
   }, []);
 
   const supabaseSaveMessage = useCallback(async (userId: string, threadId: string, msg: Message) => {
     if (msg.type === 'system') return; // never persist welcome messages
-    const supabase = createClient();
-    const { error } = await supabase.from('chat_messages').upsert({
-      id: msg.id,
-      thread_id: threadId,
-      user_id: userId,
-      type: msg.type,
-      content: messageToContent(msg),
-      created_at: msg.timestamp,
-    }, { onConflict: 'id' });
-    if (!error) persistedMsgIds.current.add(msg.id);
+    try {
+      await api.saveChatMessage(userId, threadId, msg.id, msg.type, messageToContent(msg), msg.timestamp);
+      persistedMsgIds.current.add(msg.id);
+    } catch (err) {
+      console.error('Failed to persist chat message:', err);
+    }
   }, []);
 
   // ── Init ──────────────────────────────────────────────────────────────────
 
-  const initializeForUser = useCallback(async (userId: string, isAuthUser: boolean) => {
+  const initializeForUser = useCallback(async (userId: string, isAuthUser: boolean, authUser?: User | null) => {
     if (lastInitUserId.current === userId) return;
     lastInitUserId.current = userId;
 
     setState(prev => ({ ...prev, sessionId: userId }));
 
     if (isAuthUser) {
+      if (authUser) {
+        try {
+          await api.syncChatUser(chatUserProfile(authUser));
+        } catch (err) {
+          console.error('Failed to sync chat user:', err);
+        }
+      }
       const persisted = await supabaseLoadChats(userId);
       if (persisted && persisted.length > 0) {
         setState(prev => ({
@@ -241,12 +289,12 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     const supabase = createClient();
     supabase.auth.getUser().then(({ data: { user: u } }) => {
       setUser(u);
-      initializeForUser(u ? u.id : getSessionId(), !!u);
+      initializeForUser(u ? u.id : getSessionId(), !!u, u);
     });
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       const u = session?.user ?? null;
       setUser(u);
-      initializeForUser(u ? u.id : getSessionId(), !!u);
+      initializeForUser(u ? u.id : getSessionId(), !!u, u);
     });
     return () => subscription.unsubscribe();
   }, [initializeForUser]);
@@ -351,6 +399,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     let chatId = state.activeChatId;
     if (!chatId) chatId = await addChat();
 
+    const currentChat = stateRef.current.chats.find(c => c.id === chatId);
+    const conversationMemory = buildConversationHistory(currentChat, prompt);
     const userMsg: Message = { id: generateId(), type: 'user', content: prompt, timestamp: now() };
     await addMessage(chatId, userMsg);
     setState(prev => ({ ...prev, isLoading: true }));
@@ -367,7 +417,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       }
 
       const plan = await api.generatePlan(
-        prompt, modelIds, state.sessionId, state.conversationHistory, state.sharedContext,
+        prompt, modelIds, state.sessionId, conversationMemory, state.sharedContext,
       );
       await addMessage(chatId, { id: generateId(), type: 'plan', plan, timestamp: now() });
     } catch (err) {
@@ -379,7 +429,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     } finally {
       setState(prev => ({ ...prev, isLoading: false }));
     }
-  }, [state.activeChatId, state.availableModels, state.sessionId, state.conversationHistory, state.sharedContext, addMessage, addChat]);
+  }, [state.activeChatId, state.availableModels, state.sessionId, state.sharedContext, addMessage, addChat]);
 
   // ── approvePlan ───────────────────────────────────────────────────────────
 
@@ -396,12 +446,18 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     await addMessage(chatId, execMsg);
 
     try {
-      const result = await api.executePlan(plan, state.sessionId);
+      const currentChat = stateRef.current.chats.find(c => c.id === chatId);
+      const conversationMemory = buildConversationHistory(currentChat);
+      const result = await api.executePlan(plan, state.sessionId, conversationMemory, state.sharedContext);
       setState(prev => ({
         ...prev,
         conversationHistory: [
           ...prev.conversationHistory,
-          { prompt: plan.prompt, resultSummary: truncate(result.finalOutput || 'Execution completed', 200) },
+          {
+            prompt: plan.prompt,
+            resultSummary: truncate(result.finalOutput || 'Execution completed', 200),
+            response: result.finalOutput || '',
+          },
         ].slice(-5),
       }));
       updateMessage(chatId, execMsgId, { type: 'result', result, plan, timestamp: now() } as Partial<Message>);
@@ -414,7 +470,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     } finally {
       setState(prev => ({ ...prev, isExecuting: false }));
     }
-  }, [state.sessionId, addMessage, updateMessage]);
+  }, [state.sessionId, state.sharedContext, addMessage, updateMessage]);
 
   // ── cancelPlan ────────────────────────────────────────────────────────────
 

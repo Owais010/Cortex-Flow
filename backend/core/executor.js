@@ -115,7 +115,48 @@ async function executeSubtask(subtask, availableModels, keyMap, category) {
   throw new Error(`All models failed for subtask ${subtask.id}. Reasons: ${errors.join(', ')}`);
 }
 
-async function executePlan(plan, keyMap, availableModels, sessionId) {
+function truncateContextText(text, maxLength = 6000) {
+  const value = String(text || '');
+  if (value.length <= maxLength) return value;
+  return `${value.slice(0, maxLength)}\n[truncated]`;
+}
+
+function buildSessionMemoryBlock(conversationHistory = [], sharedContext = { facts: [], decisions: [] }, storedContext = { facts: [], decisions: [] }) {
+  const blocks = [];
+  const facts = [
+    ...(Array.isArray(storedContext?.facts) ? storedContext.facts : []),
+    ...(Array.isArray(sharedContext?.facts) ? sharedContext.facts : [])
+  ];
+  const decisions = [
+    ...(Array.isArray(storedContext?.decisions) ? storedContext.decisions : []),
+    ...(Array.isArray(sharedContext?.decisions) ? sharedContext.decisions : [])
+  ];
+
+  if (facts.length > 0 || decisions.length > 0) {
+    blocks.push([
+      'Known session context:',
+      ...facts.slice(-20).map((fact) => `- Fact: ${fact}`),
+      ...decisions.slice(-10).map((decision) => `- Decision: ${decision}`)
+    ].join('\n'));
+  }
+
+  if (Array.isArray(conversationHistory) && conversationHistory.length > 0) {
+    const turns = conversationHistory.slice(-6).map((entry, idx) => {
+      const response = entry.response || entry.resultSummary || '';
+      return [
+        `Turn ${idx + 1}`,
+        `User: ${truncateContextText(entry.prompt, 1200)}`,
+        response ? `Assistant/model response: ${truncateContextText(response)}` : null
+      ].filter(Boolean).join('\n');
+    });
+    blocks.push(`Conversation transcript for this session:\n${turns.join('\n\n')}`);
+  }
+
+  if (blocks.length === 0) return '';
+  return `${blocks.join('\n\n')}\n\nUse this session memory to resolve references like "it", "that", "previous response", and "summarize it".\n\n`;
+}
+
+async function executePlan(plan, keyMap, availableModels, sessionId, executionContext = {}) {
   // Dynamically compute wave assignments to ensure dependent tasks are correctly ordered
   const subtasks = plan.subtasks || [];
   const waveOf = {};
@@ -148,13 +189,15 @@ async function executePlan(plan, keyMap, availableModels, sessionId) {
   const results = [];
 
   // Read session context once at the start (only if sessionId is provided)
-  let factsBlock = '';
+  let storedContext = { facts: [], decisions: [] };
   if (sessionId) {
-    const context = await readContext(sessionId);
-    if (context.facts.length > 0) {
-      factsBlock = `Known context:\n${context.facts.join('\n')}\n\n`;
-    }
+    storedContext = await readContext(sessionId);
   }
+  const sessionMemoryBlock = buildSessionMemoryBlock(
+    executionContext.conversationHistory || [],
+    executionContext.sharedContext || { facts: [], decisions: [] },
+    storedContext
+  );
 
   for (const waveIndex of waves) {
     // Step 1: Validate wave independence — no subtask may depend on a sibling in the same wave
@@ -179,7 +222,7 @@ async function executePlan(plan, keyMap, availableModels, sessionId) {
         .map((r) => `[Output from subtask ${r.subtaskId}]\n${r.output}`)
         .join('\n\n');
 
-      const enrichedPrompt = factsBlock + (priorOutputs
+      const enrichedPrompt = sessionMemoryBlock + (priorOutputs
         ? `Context from previous steps:\n${priorOutputs}\n\nYour task:\n${subtask.prompt}`
         : subtask.prompt);
 
