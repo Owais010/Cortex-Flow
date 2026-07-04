@@ -13,6 +13,7 @@ const planRouter = require("./routes/plan");
 const executeRouter = require("./routes/execute");
 const historyRouter = require("./routes/history");
 const analyticsRouter = require("./routes/analytics");
+const chatRouter = require("./routes/chat");
 
 const app = express();
 
@@ -70,6 +71,7 @@ app.use("/api/plan", planLimiter, planRouter);
 app.use("/api/execute", executeLimiter, executeRouter);
 app.use("/api/history", readLimiter, historyRouter);
 app.use("/api/analytics", readLimiter, analyticsRouter);
+app.use("/api/chat", readLimiter, chatRouter);
 
 app.use(errorHandler);
 app.get("/", (req, res) => {
