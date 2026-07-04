@@ -59,7 +59,15 @@ export default function ChatArea() {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [activeChat?.messages.length, isLoading]);
 
-  if (!activeChat) return <div className="chat-area" />;
+  if (!activeChat) {
+    return (
+      <div className="chat-messages" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <p style={{ color: 'var(--text-dim)', fontSize: 14 }}>
+          Select a chat or start a new one.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="chat-messages">

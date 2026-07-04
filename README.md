@@ -63,7 +63,7 @@ The backend is a lightweight, high-performance Node.js server that acts as the o
 
 ---
 
-## 🛠️ Setup Instructions
+## 🛠️ Setup Instructions##
 
 ### Backend Setup
 1. Navigate to the backend directory: `cd backend`

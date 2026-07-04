@@ -1,6 +1,6 @@
 'use client';
 
-import { Plus, MessageSquare, X } from 'lucide-react';
+import { Plus, MessageSquare, X, Loader2 } from 'lucide-react';
 import Link from 'next/link';
 import { motion } from 'framer-motion';
 import { useChatContext } from '../lib/context';
@@ -10,6 +10,7 @@ export default function Sidebar() {
     chats,
     activeChatId,
     connectedProviders,
+    isLoadingChats,
     addChat,
     setActiveChat,
     deleteChat,
@@ -32,17 +33,26 @@ export default function Sidebar() {
       </div>
 
       <div className="sidebar-chats">
-        {chats.map(chat => (
-          <motion.div
-            key={chat.id}
-            className={`sidebar-chat-item ${chat.id === activeChatId ? 'active' : ''}`}
-            onClick={() => setActiveChat(chat.id)}
-            whileHover={{ x: 4 }}
-            transition={{ type: 'spring', stiffness: 400, damping: 25 }}
-          >
-            <MessageSquare size={14} style={{ color: 'var(--text-dim)', marginRight: 8, flexShrink: 0 }} />
-            <span className="sidebar-chat-title">{chat.title}</span>
-            {chats.length > 1 && (
+        {isLoadingChats ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 16px', color: 'var(--text-muted)', fontSize: 13 }}>
+            <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} />
+            Loading chats…
+          </div>
+        ) : chats.length === 0 ? (
+          <div style={{ padding: '12px 16px', color: 'var(--text-dim)', fontSize: 13 }}>
+            No chats yet. Start a new one!
+          </div>
+        ) : (
+          chats.map(chat => (
+            <motion.div
+              key={chat.id}
+              className={`sidebar-chat-item ${chat.id === activeChatId ? 'active' : ''}`}
+              onClick={() => setActiveChat(chat.id)}
+              whileHover={{ x: 4 }}
+              transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+            >
+              <MessageSquare size={14} style={{ color: 'var(--text-dim)', marginRight: 8, flexShrink: 0 }} />
+              <span className="sidebar-chat-title">{chat.title}</span>
               <button
                 className="sidebar-chat-delete"
                 onClick={(e) => { e.stopPropagation(); deleteChat(chat.id); }}
@@ -50,9 +60,9 @@ export default function Sidebar() {
               >
                 <X size={14} />
               </button>
-            )}
-          </motion.div>
-        ))}
+            </motion.div>
+          ))
+        )}
       </div>
 
       <div className="sidebar-footer">
