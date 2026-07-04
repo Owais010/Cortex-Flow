@@ -169,6 +169,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   // Track persisted message IDs to skip duplicate INSERTs
   const persistedMsgIds = useRef<Set<string>>(new Set());
   const lastInitUserId = useRef<string | null>(null);
+  // Guard against double-invocation of approvePlan (clicks, StrictMode, etc.)
+  const executingRef = useRef(false);
 
   // ── Supabase helpers ──────────────────────────────────────────────────────
 
@@ -434,6 +436,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   // ── approvePlan ───────────────────────────────────────────────────────────
 
   const approvePlan = useCallback(async (chatId: string, _messageId: string, plan: Plan) => {
+    // Ref-based guard: prevents duplicate executing messages on double-click / StrictMode
+    if (executingRef.current) return;
+    executingRef.current = true;
     setState(prev => ({ ...prev, isExecuting: true }));
 
     const wave0Ids = plan.subtasks.filter(t => !t.dependsOn || t.dependsOn.length === 0).map(t => t.id);
@@ -468,6 +473,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         timestamp: now(),
       } as Partial<Message>);
     } finally {
+      executingRef.current = false;
       setState(prev => ({ ...prev, isExecuting: false }));
     }
   }, [state.sessionId, state.sharedContext, addMessage, updateMessage]);

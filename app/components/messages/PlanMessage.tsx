@@ -18,6 +18,7 @@ export default function PlanMessage({ message }: { message: PlanMessageData }) {
   const [editedSubtasks, setEditedSubtasks] = useState<Record<number, { model?: string; prompt?: string; title?: string }>>({});
   const [isSaving, setIsSaving] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
+  const [isApproving, setIsApproving] = useState(false);
 
   const toggleTask = (id: number) => {
     setExpandedTasks(prev => {
@@ -29,7 +30,8 @@ export default function PlanMessage({ message }: { message: PlanMessageData }) {
   };
 
   const handleApprove = () => {
-    if (activeChatId) {
+    if (activeChatId && !isApproving) {
+      setIsApproving(true);
       approvePlan(activeChatId, message.id, plan);
     }
   };
@@ -292,8 +294,8 @@ export default function PlanMessage({ message }: { message: PlanMessageData }) {
               <button className="btn-ghost btn-edit" onClick={handleEnterEdit} disabled={isExecuting}>
                 <Pencil size={14} /> Edit Plan
               </button>
-              <button className="btn-primary" onClick={handleApprove} disabled={isExecuting}>
-                ✓ Approve & Execute
+              <button className="btn-primary" onClick={handleApprove} disabled={isExecuting || isApproving}>
+                {isApproving ? '⏳ Executing...' : '✓ Approve & Execute'}
               </button>
             </>
           )}
