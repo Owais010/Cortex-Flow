@@ -1,7 +1,7 @@
 'use client';
 
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react';
-import type { AppState, Chat, Message, ConnectedProvider, Plan } from './types';
+import type { AppState, Chat, Message, ConnectedProvider, Plan, ConversationHistoryEntry } from './types';
 import { generateId, now, truncate, getSessionId } from './utils';
 import { createClient } from './supabase';
 import * as api from './api';
@@ -42,6 +42,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     isLoading: false,
     isExecuting: false,
     backendOnline: false,
+    conversationHistory: [],
+    sharedContext: { facts: [], decisions: [] },
   });
 
   const initializeForUser = useCallback((userId: string) => {
@@ -205,7 +207,13 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      const plan = await api.generatePlan(prompt, modelIds, state.sessionId);
+      const plan = await api.generatePlan(
+        prompt,
+        modelIds,
+        state.sessionId,
+        state.conversationHistory,
+        state.sharedContext
+      );
       const planMsg: Message = {
         id: generateId(),
         type: 'plan',
@@ -224,10 +232,15 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     } finally {
       setState(prev => ({ ...prev, isLoading: false }));
     }
-  }, [state.activeChatId, state.availableModels, state.sessionId, addMessage]);
+  }, [state.activeChatId, state.availableModels, state.sessionId, state.conversationHistory, state.sharedContext, addMessage]);
 
   const approvePlan = useCallback(async (chatId: string, _messageId: string, plan: Plan) => {
     setState(prev => ({ ...prev, isExecuting: true }));
+
+    // Collect all subtask IDs in wave 0 as initially running (concurrent within wave)
+    const wave0Ids = plan.subtasks
+      .filter(t => !t.dependsOn || t.dependsOn.length === 0)
+      .map(t => t.id);
 
     const execMsgId = generateId();
     const execMsg: Message = {
@@ -235,7 +248,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       type: 'executing',
       plan,
       completedSubtasks: [],
-      runningSubtask: plan.subtasks[0]?.id ?? null,
+      runningSubtasks: wave0Ids,
       failedSubtasks: [],
       timestamp: now(),
     };
@@ -243,6 +256,18 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
     try {
       const result = await api.executePlan(plan, state.sessionId);
+
+      // Append to conversation history (capped at 5 client-side)
+      const summary = truncate(result.finalOutput || 'Execution completed', 200);
+      const historyEntry: ConversationHistoryEntry = {
+        prompt: plan.prompt,
+        resultSummary: summary,
+      };
+      setState(prev => ({
+        ...prev,
+        conversationHistory: [...prev.conversationHistory, historyEntry].slice(-5),
+      }));
+
       updateMessage(chatId, execMsgId, {
         type: 'result',
         result,

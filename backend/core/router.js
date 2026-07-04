@@ -125,6 +125,27 @@ function normalizePlan(plan, prompt, availableModels) {
     };
   });
 
+  // Compute wave assignments from the dependency graph.
+  // A subtask with no dependencies is wave 0; otherwise wave = max(dep waves) + 1.
+  const waveOf = {};
+  function computeWave(taskId, visited = new Set()) {
+    if (waveOf[taskId] !== undefined) return waveOf[taskId];
+    if (visited.has(taskId)) return 0; // cycle guard
+    visited.add(taskId);
+    const task = subtasks.find(t => t.id === taskId);
+    if (!task || task.dependsOn.length === 0) {
+      waveOf[taskId] = 0;
+      return 0;
+    }
+    const maxDepWave = Math.max(...task.dependsOn.map(depId => computeWave(depId, visited)));
+    waveOf[taskId] = maxDepWave + 1;
+    return waveOf[taskId];
+  }
+  for (const task of subtasks) {
+    computeWave(task.id);
+    task.wave = waveOf[task.id];
+  }
+
   const normalized = {
     category,
     difficulty,

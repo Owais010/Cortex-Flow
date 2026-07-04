@@ -75,3 +75,10 @@ CREATE TABLE IF NOT EXISTS executions (
 
 CREATE INDEX IF NOT EXISTS idx_executions_session_created
   ON executions(session_id, created_at DESC);
+
+-- 5. Session Context — stores facts and decisions worth remembering across turns
+CREATE TABLE IF NOT EXISTS session_context (
+  session_id TEXT PRIMARY KEY,
+  context JSONB NOT NULL DEFAULT '{"facts":[],"decisions":[]}'::jsonb,
+  updated_at TIMESTAMPTZ DEFAULT now()
+);

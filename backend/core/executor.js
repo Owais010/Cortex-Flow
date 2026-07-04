@@ -116,9 +116,30 @@ async function executeSubtask(subtask, availableModels, keyMap, category) {
 }
 
 async function executePlan(plan, keyMap, availableModels, sessionId) {
+  // Dynamically compute wave assignments to ensure dependent tasks are correctly ordered
+  const subtasks = plan.subtasks || [];
+  const waveOf = {};
+  function computeWave(taskId, visited = new Set()) {
+    if (waveOf[taskId] !== undefined) return waveOf[taskId];
+    if (visited.has(taskId)) return 0; // cycle guard
+    visited.add(taskId);
+    const task = subtasks.find(t => t.id === taskId);
+    if (!task || !task.dependsOn || task.dependsOn.length === 0) {
+      waveOf[taskId] = 0;
+      return 0;
+    }
+    const maxDepWave = Math.max(...task.dependsOn.map(depId => computeWave(depId, visited)));
+    waveOf[taskId] = maxDepWave + 1;
+    return waveOf[taskId];
+  }
+  for (const task of subtasks) {
+    computeWave(task.id);
+    task.wave = waveOf[task.id];
+  }
+
   const waveMap = {};
-  for (const subtask of plan.subtasks || []) {
-    const wave = subtask.wave || 0;
+  for (const subtask of subtasks) {
+    const wave = subtask.wave;
     if (!waveMap[wave]) waveMap[wave] = [];
     waveMap[wave].push(subtask);
   }

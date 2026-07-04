@@ -116,6 +116,62 @@ function ModelsTable() {
   );
 }
 
+function SessionContextPanel() {
+  const { sharedContext, conversationHistory } = useChatContext();
+  const hasFacts = sharedContext.facts.length > 0;
+  const hasDecisions = sharedContext.decisions.length > 0;
+  const hasHistory = conversationHistory.length > 0;
+  const hasAny = hasFacts || hasDecisions || hasHistory;
+
+  if (!hasAny) {
+    return <div className="models-empty">No session context accumulated yet. Context builds as you use the system.</div>;
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {hasFacts && (
+        <div>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+            Facts ({sharedContext.facts.length})
+          </div>
+          <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, color: 'var(--text-secondary)', display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {sharedContext.facts.map((fact, i) => (
+              <li key={i}>{fact}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {hasDecisions && (
+        <div>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+            Decisions ({sharedContext.decisions.length})
+          </div>
+          <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, color: 'var(--text-secondary)', display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {sharedContext.decisions.map((decision, i) => (
+              <li key={i}>{decision}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {hasHistory && (
+        <div>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+            Recent History ({conversationHistory.length}/5)
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {conversationHistory.map((entry, i) => (
+              <div key={i} style={{ fontSize: 13, color: 'var(--text-secondary)', padding: '6px 10px', background: 'var(--bg-elevated)', borderRadius: 6, border: '1px solid var(--border)' }}>
+                <div style={{ color: 'var(--text-primary)', marginBottom: 2 }}>Turn {i + 1}: {entry.prompt}</div>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{entry.resultSummary}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function SettingsPage() {
   return (
     <div className="settings-page">
@@ -140,6 +196,11 @@ export default function SettingsPage() {
         <div className="settings-section">
           <div className="settings-section-title">Available Models</div>
           <ModelsTable />
+        </div>
+
+        <div className="settings-section">
+          <div className="settings-section-title">Session Context</div>
+          <SessionContextPanel />
         </div>
       </div>
     </div>
