@@ -2,6 +2,7 @@
 
 import { useRef, useState, useCallback } from 'react';
 import { ArrowUp } from 'lucide-react';
+import { motion } from 'framer-motion';
 import { useChatContext } from '../lib/context';
 
 export default function InputBar() {
@@ -53,14 +54,16 @@ export default function InputBar() {
           rows={1}
           disabled={disabled}
         />
-        <button
+        <motion.button
           className="input-send-btn"
           onClick={handleSubmit}
           disabled={disabled || !value.trim()}
           title="Send"
+          whileHover={{ scale: 1.1 }}
+          whileTap={{ scale: 0.9 }}
         >
           <ArrowUp size={18} />
-        </button>
+        </motion.button>
       </div>
     </div>
   );

@@ -2,6 +2,7 @@
 
 import { Plus, MessageSquare, X } from 'lucide-react';
 import Link from 'next/link';
+import { motion } from 'framer-motion';
 import { useChatContext } from '../lib/context';
 
 export default function Sidebar() {
@@ -19,18 +20,25 @@ export default function Sidebar() {
   return (
     <div className="sidebar">
       <div className="sidebar-header">
-        <button className="sidebar-new-chat" onClick={() => addChat()}>
+        <motion.button
+          className="sidebar-new-chat"
+          onClick={() => addChat()}
+          whileHover={{ scale: 1.02 }}
+          whileTap={{ scale: 0.97 }}
+        >
           <Plus size={16} />
           New Chat
-        </button>
+        </motion.button>
       </div>
 
       <div className="sidebar-chats">
         {chats.map(chat => (
-          <div
+          <motion.div
             key={chat.id}
             className={`sidebar-chat-item ${chat.id === activeChatId ? 'active' : ''}`}
             onClick={() => setActiveChat(chat.id)}
+            whileHover={{ x: 4 }}
+            transition={{ type: 'spring', stiffness: 400, damping: 25 }}
           >
             <MessageSquare size={14} style={{ color: 'var(--text-dim)', marginRight: 8, flexShrink: 0 }} />
             <span className="sidebar-chat-title">{chat.title}</span>
@@ -43,7 +51,7 @@ export default function Sidebar() {
                 <X size={14} />
               </button>
             )}
-          </div>
+          </motion.div>
         ))}
       </div>
 

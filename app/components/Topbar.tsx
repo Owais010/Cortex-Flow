@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Settings, LogOut } from 'lucide-react';
+import { motion } from 'framer-motion';
 import { useChatContext } from '../lib/context';
 
 export default function Topbar() {
@@ -21,8 +22,13 @@ export default function Topbar() {
   };
 
   return (
-    <div className="topbar">
-      <div className="topbar-logo">Cortex Flow</div>
+    <motion.div
+      className="topbar"
+      initial={{ y: -56 }}
+      animate={{ y: 0 }}
+      transition={{ duration: 0.4, ease: 'easeOut' }}
+    >
+      <div className="topbar-logo">CORTEX FLOW</div>
       <div className="topbar-right">
         {!backendOnline && (
           <span style={{ fontSize: 11, color: 'var(--error)' }}>Backend offline</span>
@@ -35,25 +41,29 @@ export default function Topbar() {
             {availableModels.length} model{availableModels.length !== 1 ? 's' : ''}
           </span>
         </div>
-        <Link href="/settings" className="topbar-settings-link" title="Settings">
-          <Settings size={18} />
-        </Link>
+        <motion.div whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}>
+          <Link href="/settings" className="topbar-settings-link" title="Settings">
+            <Settings size={18} />
+          </Link>
+        </motion.div>
         {user && (
           <>
             <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
               {user.email?.split('@')[0]}
             </span>
-            <button
+            <motion.button
               onClick={handleLogout}
               className="topbar-settings-link"
               title="Logout"
               style={{ border: 'none' }}
+              whileHover={{ scale: 1.1 }}
+              whileTap={{ scale: 0.9 }}
             >
               <LogOut size={16} />
-            </button>
+            </motion.button>
           </>
         )}
       </div>
-    </div>
+    </motion.div>
   );
 }

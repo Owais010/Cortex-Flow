@@ -12,6 +12,9 @@ export default function ChatPage() {
       <div className="app-body">
         <Sidebar />
         <div className="chat-area">
+          {/* Ambient glow orbs behind the chat */}
+          <div className="chat-ambient-orb chat-ambient-orb-1" aria-hidden="true" />
+          <div className="chat-ambient-orb chat-ambient-orb-2" aria-hidden="true" />
           <ChatArea />
           <InputBar />
         </div>
