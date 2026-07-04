@@ -78,7 +78,7 @@ router.get("/threads", async (req, res) => {
 // ── Create a new thread ───────────────────────────────────────────────────
 router.post("/threads", async (req, res) => {
   try {
-    const { user_id, title, email, display_name, avatar_url } = req.body;
+    const { id, user_id, title, email, display_name, avatar_url } = req.body;
     if (!user_id) {
       return res.status(400).json({ error: "user_id is required" });
     }
@@ -100,16 +100,22 @@ router.post("/threads", async (req, res) => {
       }
     }
 
-    const threadId = crypto.randomUUID();
+    // Client is the source of truth for the thread id. Upsert idempotently so
+    // repeated "ensure exists" calls never create duplicate/orphan threads and
+    // never clobber an existing title (ignoreDuplicates skips the row on conflict).
+    const threadId = id || crypto.randomUUID();
     const now = new Date().toISOString();
 
-    const { error } = await supabase.from("chat_threads").insert({
-      id: threadId,
-      user_id,
-      title: title || "New Chat",
-      created_at: now,
-      updated_at: now,
-    });
+    const { error } = await supabase.from("chat_threads").upsert(
+      {
+        id: threadId,
+        user_id,
+        title: title || "New Chat",
+        created_at: now,
+        updated_at: now,
+      },
+      { onConflict: "id", ignoreDuplicates: true }
+    );
 
     if (error) {
       console.error("Error creating thread:", error);
@@ -167,7 +173,12 @@ router.delete("/threads/:id", async (req, res) => {
   }
 });
 
-// ── Persist a message ─────────────────────────────────────────────────────
+// ── Persist a message (idempotent full-state upsert) ──────────────────────
+// The client is the source of truth for the message id and always sends the
+// FULL current state of the message. Upserting on the id means the same call
+// both creates the row and later updates it in place (e.g. an "executing"
+// message transitioning to its final "result"/"error" state). This is what
+// guarantees the final answer of every conversation is never lost.
 router.post("/threads/:threadId/messages", async (req, res) => {
   try {
     const { threadId } = req.params;
@@ -177,23 +188,28 @@ router.post("/threads/:threadId/messages", async (req, res) => {
       return res.status(400).json({ error: "user_id and message_id are required" });
     }
 
-    const { error } = await supabase.from("chat_messages").insert({
-      id: message_id,
-      thread_id: threadId,
-      user_id,
-      type,
-      content,
-      created_at: created_at || new Date().toISOString(),
-    });
+    const { error } = await supabase.from("chat_messages").upsert(
+      {
+        id: message_id,
+        thread_id: threadId,
+        user_id,
+        type,
+        content,
+        created_at: created_at || new Date().toISOString(),
+      },
+      { onConflict: "id" }
+    );
 
     if (error) {
-      // Ignore duplicate inserts
-      if (error.code === "23505") {
-        return res.json({ success: true, duplicate: true });
-      }
       console.error("Error persisting message:", error);
       return res.status(500).json({ error: "Failed to persist message" });
     }
+
+    // Keep the thread at the top of the sidebar (most-recent-activity order).
+    await supabase
+      .from("chat_threads")
+      .update({ updated_at: new Date().toISOString() })
+      .eq("id", threadId);
 
     res.json({ success: true });
   } catch (err) {

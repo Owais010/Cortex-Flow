@@ -24,7 +24,6 @@ import type { User } from '@supabase/supabase-js';
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
-/** Deserialise a raw chat_messages row into a typed Message */
 function rowToMessage(row: { id: string; type: string; content: unknown; created_at: string }): Message {
   const payload = row.content as Record<string, unknown>;
   return {
@@ -35,13 +34,12 @@ function rowToMessage(row: { id: string; type: string; content: unknown; created
   } as Message;
 }
 
-/** Serialise a Message into the jsonb `content` column (everything except id / type / timestamp) */
 function messageToContent(msg: Message): Record<string, unknown> {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { id: _id, type: _type, timestamp: _ts, ...rest } = msg as Record<string, unknown>;
   return rest;
 }
 
-/** System welcome message added locally – never persisted */
 function welcomeMessage(): Message {
   return {
     id: generateId(),
@@ -51,7 +49,7 @@ function welcomeMessage(): Message {
   } as Message;
 }
 
-// ─── types ──────────────────────────────────────────────────────────────────
+// ─── context type ────────────────────────────────────────────────────────────
 
 interface ChatContextType extends AppState {
   user: User | null;
@@ -78,7 +76,7 @@ export function useChatContext() {
   return ctx;
 }
 
-// ─── provider ───────────────────────────────────────────────────────────────
+// ─── provider ────────────────────────────────────────────────────────────────
 
 export function ChatProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
@@ -96,133 +94,104 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     sharedContext: { facts: [], decisions: [] },
   });
 
-  // Track which message IDs are already persisted so updateMessage can do an
-  // upsert-style UPDATE instead of a duplicate INSERT.
+  // stateRef lets callbacks read the latest state without stale closures
+  const stateRef = useRef(state);
+  stateRef.current = state;
+
+  // Track persisted message IDs to skip duplicate INSERTs
   const persistedMsgIds = useRef<Set<string>>(new Set());
-  const lastInitializedUserId = useRef<string | null>(null);
+  const lastInitUserId = useRef<string | null>(null);
 
-  // ── Chat persistence via backend API ──────────────────────────────────────
+  // ── Supabase helpers ──────────────────────────────────────────────────────
 
-  /** Load all threads + their messages for the logged-in user via backend */
-  const loadChatsFromBackend = useCallback(async (userId: string) => {
+  const supabaseLoadChats = useCallback(async (userId: string): Promise<Chat[] | null> => {
+    const supabase = createClient();
     setIsLoadingChats(true);
     try {
-      const result = await api.loadChatThreads(userId);
-      if (!result || !result.threads || result.threads.length === 0) {
-        setIsLoadingChats(false);
-        return null;
-      }
+      const { data: threads, error: tErr } = await supabase
+        .from('chat_threads')
+        .select('*')
+        .eq('user_id', userId)
+        .order('updated_at', { ascending: false });
 
-      // Mark all loaded message IDs as persisted
-      (result.messages ?? []).forEach(r => persistedMsgIds.current.add(r.id));
+      if (tErr || !threads || threads.length === 0) return null;
 
-      // Group messages by thread
+      const { data: msgs, error: mErr } = await supabase
+        .from('chat_messages')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: true });
+
+      if (mErr) return null;
+
+      (msgs ?? []).forEach(r => persistedMsgIds.current.add(r.id));
+
       const msgsByThread: Record<string, Message[]> = {};
-      for (const row of result.messages ?? []) {
+      for (const row of msgs ?? []) {
         if (!msgsByThread[row.thread_id]) msgsByThread[row.thread_id] = [];
         msgsByThread[row.thread_id].push(rowToMessage(row));
       }
 
-      const chats: Chat[] = result.threads.map(t => ({
+      return threads.map(t => ({
         id: t.id,
         title: t.title,
         createdAt: t.created_at,
-        messages: [
-          welcomeMessage(),
-          ...(msgsByThread[t.id] ?? []),
-        ],
+        messages: [welcomeMessage(), ...(msgsByThread[t.id] ?? [])],
       }));
-
-      return chats;
-    } catch (err) {
-      console.error('Exception in loadChatsFromBackend:', err);
-      return null;
     } finally {
       setIsLoadingChats(false);
     }
   }, []);
 
-  /** Create a new thread row via backend API and return its ID */
-  const createThreadViaBackend = useCallback(async (userId: string, title = 'New Chat'): Promise<string> => {
-    const currentUser = user;
-    const result = await api.createChatThread(
-      userId,
+  const supabaseCreateThread = useCallback(async (userId: string, threadId: string, title: string) => {
+    const supabase = createClient();
+    await supabase.from('chat_threads').upsert({
+      id: threadId,
+      user_id: userId,
       title,
-      currentUser?.email || '',
-      currentUser?.user_metadata?.display_name || currentUser?.user_metadata?.full_name || currentUser?.email?.split('@')[0] || '',
-      currentUser?.user_metadata?.avatar_url || '',
-    );
-    if (result) {
-      return result.id;
-    }
-    // Fallback: generate a local ID if backend fails
-    console.error('Failed to create thread via backend, using local ID');
-    return generateId();
-  }, [user]);
-
-  /** Update the thread title via backend */
-  const updateThreadTitle = useCallback(async (threadId: string, title: string) => {
-    await api.updateChatThreadTitle(threadId, title);
+      created_at: now(),
+      updated_at: now(),
+    }, { onConflict: 'id' });
   }, []);
 
-  /** Insert a single message row via backend */
-  const persistMessage = useCallback(async (
-    userId: string,
-    threadId: string,
-    msg: Message,
-  ) => {
-    if (persistedMsgIds.current.has(msg.id)) return; // already saved
-    // Skip ephemeral system welcome messages
-    if (msg.type === 'system') return;
-
-    await api.persistChatMessage(
-      threadId,
-      userId,
-      msg.id,
-      msg.type,
-      messageToContent(msg),
-      msg.timestamp,
-    );
-    persistedMsgIds.current.add(msg.id);
+  const supabaseUpdateThreadTitle = useCallback(async (threadId: string, title: string) => {
+    const supabase = createClient();
+    await supabase
+      .from('chat_threads')
+      .update({ title, updated_at: now() })
+      .eq('id', threadId);
   }, []);
 
-  /** Update an existing message row via backend */
-  const updatePersistedMessage = useCallback(async (
-    msgId: string,
-    updates: Partial<Message>,
-  ) => {
-    if (!persistedMsgIds.current.has(msgId)) return;
-    const { type, timestamp, id: _id, ...rest } = updates as Record<string, unknown>;
-    await api.updateChatMessage(msgId, {
-      ...(type ? { type: type as string } : {}),
-      ...(timestamp ? { created_at: timestamp as string } : {}),
-      content: rest as Record<string, unknown>,
-    });
+  const supabaseDeleteThread = useCallback(async (threadId: string) => {
+    const supabase = createClient();
+    // cascade via FK deletes messages automatically
+    await supabase.from('chat_threads').delete().eq('id', threadId);
   }, []);
 
-  // ── Initialise ────────────────────────────────────────────────────────────
+  const supabaseSaveMessage = useCallback(async (userId: string, threadId: string, msg: Message) => {
+    if (msg.type === 'system') return; // never persist welcome messages
+    const supabase = createClient();
+    const { error } = await supabase.from('chat_messages').upsert({
+      id: msg.id,
+      thread_id: threadId,
+      user_id: userId,
+      type: msg.type,
+      content: messageToContent(msg),
+      created_at: msg.timestamp,
+    }, { onConflict: 'id' });
+    if (!error) persistedMsgIds.current.add(msg.id);
+  }, []);
+
+  // ── Init ──────────────────────────────────────────────────────────────────
 
   const initializeForUser = useCallback(async (userId: string, isAuthUser: boolean) => {
-    if (lastInitializedUserId.current === userId) return;
-    lastInitializedUserId.current = userId;
+    if (lastInitUserId.current === userId) return;
+    lastInitUserId.current = userId;
 
     setState(prev => ({ ...prev, sessionId: userId }));
 
     if (isAuthUser) {
-      // Sync user to public.users via backend (handles FK constraint)
-      const supabase = createClient();
-      const { data: { user: currentUser } } = await supabase.auth.getUser();
-      if (currentUser) {
-        await api.syncUser(
-          currentUser.id,
-          currentUser.email || '',
-          currentUser.user_metadata?.display_name || currentUser.user_metadata?.full_name || currentUser.email?.split('@')[0] || '',
-          currentUser.user_metadata?.avatar_url || '',
-        );
-      }
-
-      // Load chats via backend API (uses service role key, bypasses RLS)
-      const persisted = await loadChatsFromBackend(userId);
+      const persisted = await supabaseLoadChats(userId);
       if (persisted && persisted.length > 0) {
         setState(prev => ({
           ...prev,
@@ -233,36 +202,24 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             : persisted[0].id,
         }));
       } else {
-        // No saved chats — show empty state; thread created on first prompt
-        setState(prev => ({
-          ...prev,
-          sessionId: userId,
-          chats: [],
-          activeChatId: null,
-        }));
+        setState(prev => ({ ...prev, sessionId: userId, chats: [], activeChatId: null }));
       }
     } else {
-      // Guest: keep local chats only, load from localStorage
+      // Guest: local only
       let localChats: Chat[] = [];
-      if (typeof window !== 'undefined') {
-        const stored = localStorage.getItem('cortex_flow_guest_chats');
-        if (stored) {
-          try {
-            localChats = JSON.parse(stored);
-          } catch (e) {
-            console.error('Error parsing guest chats:', e);
-          }
-        }
-      }
+      try {
+        const stored = typeof window !== 'undefined' && localStorage.getItem('cortex_flow_guest_chats');
+        if (stored) localChats = JSON.parse(stored);
+      } catch { /* ignore */ }
       setState(prev => ({
         ...prev,
         sessionId: userId,
-        chats: localChats.length > 0 ? localChats : (prev.chats.length > 0 ? prev.chats : []),
-        activeChatId: prev.activeChatId || (localChats.length > 0 ? localChats[0].id : null),
+        chats: localChats.length > 0 ? localChats : prev.chats,
+        activeChatId: prev.activeChatId || localChats[0]?.id || null,
       }));
     }
 
-    // Backend health + models
+    // Backend health + models (fire-and-forget)
     api.healthCheck().then(online => {
       setState(prev => ({ ...prev, backendOnline: online }));
       if (online) {
@@ -277,220 +234,148 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         });
       }
     });
-  }, [loadChatsFromBackend]);
+  }, [supabaseLoadChats]);
 
   // Auth listener
   useEffect(() => {
     const supabase = createClient();
-
     supabase.auth.getUser().then(({ data: { user: u } }) => {
       setUser(u);
-      if (u) {
-        initializeForUser(u.id, true);
-      } else {
-        initializeForUser(getSessionId(), false);
-      }
+      initializeForUser(u ? u.id : getSessionId(), !!u);
     });
-
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       const u = session?.user ?? null;
       setUser(u);
-      if (u) {
-        initializeForUser(u.id, true);
-      } else {
-        initializeForUser(getSessionId(), false);
-      }
+      initializeForUser(u ? u.id : getSessionId(), !!u);
     });
-
     return () => subscription.unsubscribe();
   }, [initializeForUser]);
 
   // Persist guest chats to localStorage
   useEffect(() => {
     if (!user && state.sessionId) {
-      localStorage.setItem('cortex_flow_guest_chats', JSON.stringify(state.chats));
+      try { localStorage.setItem('cortex_flow_guest_chats', JSON.stringify(state.chats)); } catch { /* ignore */ }
     }
   }, [state.chats, user, state.sessionId]);
 
   // ── Chat CRUD ─────────────────────────────────────────────────────────────
 
   const addChat = useCallback(async (): Promise<string> => {
-    const welcome = welcomeMessage();
-    let newId: string;
-
-    if (user) {
-      newId = await createThreadViaBackend(user.id, 'New Chat');
-    } else {
-      newId = generateId();
-    }
-
+    const newId = generateId();
+    if (user) await supabaseCreateThread(user.id, newId, 'New Chat');
     const newChat: Chat = {
       id: newId,
       title: 'New Chat',
-      messages: [welcome],
+      messages: [welcomeMessage()],
       createdAt: now(),
     };
-
-    setState(prev => ({
-      ...prev,
-      chats: [newChat, ...prev.chats],
-      activeChatId: newId,
-    }));
-
+    setState(prev => ({ ...prev, chats: [newChat, ...prev.chats], activeChatId: newId }));
     return newId;
-  }, [user, createThreadViaBackend]);
+  }, [user, supabaseCreateThread]);
 
   const setActiveChat = useCallback((id: string) => {
     setState(prev => ({ ...prev, activeChatId: id }));
   }, []);
 
   const deleteChat = useCallback(async (id: string) => {
-    if (user) {
-      await api.deleteChatThread(id);
-    }
-
+    if (user) await supabaseDeleteThread(id);
     setState(prev => {
       const filtered = prev.chats.filter(c => c.id !== id);
-      let newActiveId = prev.activeChatId;
-      if (prev.activeChatId === id) {
-        newActiveId = filtered[0]?.id ?? null;
-      }
-      return { ...prev, chats: filtered, activeChatId: newActiveId };
+      return {
+        ...prev,
+        chats: filtered,
+        activeChatId: prev.activeChatId === id ? (filtered[0]?.id ?? null) : prev.activeChatId,
+      };
     });
-  }, [user]);
+  }, [user, supabaseDeleteThread]);
 
   // ── Message ops ───────────────────────────────────────────────────────────
 
   const addMessage = useCallback(async (chatId: string, message: Message) => {
-    // If this is the first real message in a thread that has no DB row yet,
-    // create the thread first.
+    // Ensure the thread row exists before inserting the message (avoids FK violation)
     if (user && message.type === 'user') {
-      // Ensure thread exists — try creating via backend (it handles duplicates)
-      const currentUser = user;
-      await api.createChatThread(
-        currentUser.id,
-        truncate((message as { content: string }).content, 40),
-        currentUser.email || '',
-        currentUser.user_metadata?.display_name || currentUser.user_metadata?.full_name || currentUser.email?.split('@')[0] || '',
-        currentUser.user_metadata?.avatar_url || '',
-      );
+      const title = truncate((message as { content: string }).content, 40);
+      await supabaseCreateThread(user.id, chatId, title);
     }
 
     setState(prev => {
       const updatedChats = prev.chats.map(c => {
         if (c.id !== chatId) return c;
-        const isFirstUserMsg = message.type === 'user' && c.title === 'New Chat';
-        const newTitle = isFirstUserMsg
+        const isFirstUser = message.type === 'user' && c.title === 'New Chat';
+        const newTitle = isFirstUser
           ? truncate((message as { content: string }).content, 40)
           : c.title;
-
-        if (isFirstUserMsg && user) {
-          updateThreadTitle(chatId, newTitle);
-        }
-
-        return {
-          ...c,
-          title: newTitle,
-          messages: [...c.messages, message],
-        };
+        if (isFirstUser && user) supabaseUpdateThreadTitle(chatId, newTitle);
+        return { ...c, title: newTitle, messages: [...c.messages, message] };
       });
 
-      // If chatId doesn't exist yet (new chat with first message scenario)
-      const exists = updatedChats.some(c => c.id === chatId);
-      if (!exists) {
+      if (!updatedChats.some(c => c.id === chatId)) {
+        const title = message.type === 'user'
+          ? truncate((message as { content: string }).content, 40)
+          : 'New Chat';
         const newChat: Chat = {
           id: chatId,
-          title: message.type === 'user' ? truncate((message as { content: string }).content, 40) : 'New Chat',
+          title,
           messages: [welcomeMessage(), message],
           createdAt: now(),
         };
         return { ...prev, chats: [newChat, ...prev.chats], activeChatId: chatId };
       }
-
       return { ...prev, chats: updatedChats };
     });
 
-    // Persist to backend
-    if (user) {
-      await persistMessage(user.id, chatId, message);
-    }
-  }, [user, persistMessage, updateThreadTitle]);
+    if (user) await supabaseSaveMessage(user.id, chatId, message);
+  }, [user, supabaseCreateThread, supabaseUpdateThreadTitle, supabaseSaveMessage]);
 
   const updateMessage = useCallback((chatId: string, messageId: string, updates: Partial<Message>) => {
     setState(prev => ({
       ...prev,
       chats: prev.chats.map(c =>
         c.id === chatId
-          ? {
-            ...c,
-            messages: c.messages.map(m =>
-              m.id === messageId ? { ...m, ...updates } as Message : m
-            ),
-          }
+          ? { ...c, messages: c.messages.map(m => m.id === messageId ? { ...m, ...updates } as Message : m) }
           : c
       ),
     }));
 
-    // Persist update
+    // Persist the fully-merged message so 'executing' → 'result' transitions are saved
     if (user) {
-      updatePersistedMessage(messageId, updates);
+      const chat = stateRef.current.chats.find(c => c.id === chatId);
+      const old = chat?.messages.find(m => m.id === messageId);
+      if (old) supabaseSaveMessage(user.id, chatId, { ...old, ...updates } as Message);
     }
-  }, [user, updatePersistedMessage]);
+  }, [user, supabaseSaveMessage]);
 
   // ── sendPrompt ────────────────────────────────────────────────────────────
 
   const sendPrompt = useCallback(async (prompt: string) => {
-    // If no active chat, create one first
     let chatId = state.activeChatId;
-    if (!chatId) {
-      chatId = await addChat();
-    }
+    if (!chatId) chatId = await addChat();
 
-    const userMsg: Message = {
-      id: generateId(),
-      type: 'user',
-      content: prompt,
-      timestamp: now(),
-    };
+    const userMsg: Message = { id: generateId(), type: 'user', content: prompt, timestamp: now() };
     await addMessage(chatId, userMsg);
     setState(prev => ({ ...prev, isLoading: true }));
 
     try {
       const modelIds = state.availableModels.map(m => m.id);
-
       if (modelIds.length === 0) {
-        const errMsg: Message = {
-          id: generateId(),
-          type: 'error',
+        await addMessage(chatId, {
+          id: generateId(), type: 'error',
           content: 'No models available. Please connect at least one API key in Settings.',
           timestamp: now(),
-        };
-        await addMessage(chatId, errMsg);
+        });
         return;
       }
 
       const plan = await api.generatePlan(
-        prompt,
-        modelIds,
-        state.sessionId,
-        state.conversationHistory,
-        state.sharedContext,
+        prompt, modelIds, state.sessionId, state.conversationHistory, state.sharedContext,
       );
-      const planMsg: Message = {
-        id: generateId(),
-        type: 'plan',
-        plan,
-        timestamp: now(),
-      };
-      await addMessage(chatId, planMsg);
+      await addMessage(chatId, { id: generateId(), type: 'plan', plan, timestamp: now() });
     } catch (err) {
-      const errMsg: Message = {
-        id: generateId(),
-        type: 'error',
+      await addMessage(chatId, {
+        id: generateId(), type: 'error',
         content: err instanceof Error ? err.message : 'Failed to generate plan',
         timestamp: now(),
-      };
-      await addMessage(chatId, errMsg);
+      });
     } finally {
       setState(prev => ({ ...prev, isLoading: false }));
     }
@@ -501,40 +386,25 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const approvePlan = useCallback(async (chatId: string, _messageId: string, plan: Plan) => {
     setState(prev => ({ ...prev, isExecuting: true }));
 
-    const wave0Ids = plan.subtasks
-      .filter(t => !t.dependsOn || t.dependsOn.length === 0)
-      .map(t => t.id);
-
+    const wave0Ids = plan.subtasks.filter(t => !t.dependsOn || t.dependsOn.length === 0).map(t => t.id);
     const execMsgId = generateId();
     const execMsg: Message = {
-      id: execMsgId,
-      type: 'executing',
-      plan,
-      completedSubtasks: [],
-      runningSubtasks: wave0Ids,
-      failedSubtasks: [],
+      id: execMsgId, type: 'executing', plan,
+      completedSubtasks: [], runningSubtasks: wave0Ids, failedSubtasks: [],
       timestamp: now(),
     };
     await addMessage(chatId, execMsg);
 
     try {
       const result = await api.executePlan(plan, state.sessionId);
-
-      const summary = truncate(result.finalOutput || 'Execution completed', 200);
       setState(prev => ({
         ...prev,
         conversationHistory: [
           ...prev.conversationHistory,
-          { prompt: plan.prompt, resultSummary: summary },
+          { prompt: plan.prompt, resultSummary: truncate(result.finalOutput || 'Execution completed', 200) },
         ].slice(-5),
       }));
-
-      updateMessage(chatId, execMsgId, {
-        type: 'result',
-        result,
-        plan,
-        timestamp: now(),
-      } as Partial<Message>);
+      updateMessage(chatId, execMsgId, { type: 'result', result, plan, timestamp: now() } as Partial<Message>);
     } catch (err) {
       updateMessage(chatId, execMsgId, {
         type: 'error',
@@ -552,14 +422,12 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     setState(prev => ({
       ...prev,
       chats: prev.chats.map(c =>
-        c.id === chatId
-          ? { ...c, messages: c.messages.filter(m => m.id !== messageId) }
-          : c
+        c.id === chatId ? { ...c, messages: c.messages.filter(m => m.id !== messageId) } : c
       ),
     }));
   }, []);
 
-  // ── provider / model ops ──────────────────────────────────────────────────
+  // ── provider / models ─────────────────────────────────────────────────────
 
   const connectProvider = useCallback(async (provider: string, apiKey: string) => {
     const result = await api.submitKey(provider, apiKey, state.sessionId);
@@ -597,7 +465,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     const supabase = createClient();
     await supabase.auth.signOut();
     persistedMsgIds.current.clear();
-    lastInitializedUserId.current = null;
+    lastInitUserId.current = null;
     setUser(null);
     setState(prev => ({
       ...prev,
