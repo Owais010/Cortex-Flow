@@ -292,7 +292,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     const models = await api.getModels(state.sessionId);
     const providers = Array.from(new Set(models.map(m => m.provider))).map(p => ({
       provider: p as ConnectedProvider['provider'],
-      status: 'active' as const
+      status: 'active' as const,
+      hint: 'Loaded from backend',
+      validated_at: new Date().toISOString()
     }));
     setState(prev => ({ ...prev, availableModels: models, connectedProviders: providers }));
   }, [state.sessionId]);
