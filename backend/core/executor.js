@@ -6,6 +6,7 @@ const { getFallbackOrder } = require('./fallback');
 const { getProviderForModel } = require('../db/models');
 const vault = require('../security/vault');
 const { computeActualCost } = require('./token_counter');
+const { readContext, writeContext } = require('./memory');
 
 async function callLLMProvider(provider, modelId, apiKey, prompt) {
   if (provider === 'anthropic') {
@@ -114,10 +115,31 @@ async function executeSubtask(subtask, availableModels, keyMap, category) {
   throw new Error(`All models failed for subtask ${subtask.id}. Reasons: ${errors.join(', ')}`);
 }
 
-async function executePlan(plan, keyMap, availableModels) {
+async function executePlan(plan, keyMap, availableModels, sessionId) {
+  // Dynamically compute wave assignments to ensure dependent tasks are correctly ordered
+  const subtasks = plan.subtasks || [];
+  const waveOf = {};
+  function computeWave(taskId, visited = new Set()) {
+    if (waveOf[taskId] !== undefined) return waveOf[taskId];
+    if (visited.has(taskId)) return 0; // cycle guard
+    visited.add(taskId);
+    const task = subtasks.find(t => t.id === taskId);
+    if (!task || !task.dependsOn || task.dependsOn.length === 0) {
+      waveOf[taskId] = 0;
+      return 0;
+    }
+    const maxDepWave = Math.max(...task.dependsOn.map(depId => computeWave(depId, visited)));
+    waveOf[taskId] = maxDepWave + 1;
+    return waveOf[taskId];
+  }
+  for (const task of subtasks) {
+    computeWave(task.id);
+    task.wave = waveOf[task.id];
+  }
+
   const waveMap = {};
-  for (const subtask of plan.subtasks || []) {
-    const wave = subtask.wave || 0;
+  for (const subtask of subtasks) {
+    const wave = subtask.wave;
     if (!waveMap[wave]) waveMap[wave] = [];
     waveMap[wave].push(subtask);
   }
@@ -125,30 +147,62 @@ async function executePlan(plan, keyMap, availableModels) {
   const waves = Object.keys(waveMap).map(Number).sort((a, b) => a - b);
   const results = [];
 
+  // Read session context once at the start (only if sessionId is provided)
+  let factsBlock = '';
+  if (sessionId) {
+    const context = await readContext(sessionId);
+    if (context.facts.length > 0) {
+      factsBlock = `Known context:\n${context.facts.join('\n')}\n\n`;
+    }
+  }
+
   for (const waveIndex of waves) {
-    for (const subtask of waveMap[waveIndex]) {
+    // Step 1: Validate wave independence — no subtask may depend on a sibling in the same wave
+    const waveSubtasks = waveMap[waveIndex];
+    const waveIds = new Set(waveSubtasks.map((s) => s.id));
+    for (const subtask of waveSubtasks) {
+      const deps = subtask.dependsOn || [];
+      for (const depId of deps) {
+        if (waveIds.has(depId)) {
+          throw new Error(
+            `Wave ${waveIndex} contains an intra-wave dependency: subtask ${subtask.id} depends on subtask ${depId}, but both are in the same wave. Dependent tasks must be in a later wave.`
+          );
+        }
+      }
+    }
+
+    // Step 2: Execute all subtasks in this wave concurrently (they are verified independent)
+    const wavePromises = waveSubtasks.map((subtask) => {
       const deps = subtask.dependsOn || [];
       const priorOutputs = results
         .filter((r) => deps.includes(r.subtaskId))
         .map((r) => `[Output from subtask ${r.subtaskId}]\n${r.output}`)
         .join('\n\n');
 
-      const enrichedPrompt = priorOutputs
+      const enrichedPrompt = factsBlock + (priorOutputs
         ? `Context from previous steps:\n${priorOutputs}\n\nYour task:\n${subtask.prompt}`
-        : subtask.prompt;
+        : subtask.prompt);
 
-      try {
-        const result = await executeSubtask(
-          { ...subtask, prompt: enrichedPrompt },
-          availableModels,
-          keyMap,
-          plan.category || 'general'
-        );
-        results.push(result);
-      } catch (error) {
-        console.error(`Execution failed on subtask ${subtask.id}: ${error.message}`);
+      return executeSubtask(
+        { ...subtask, prompt: enrichedPrompt },
+        availableModels,
+        keyMap,
+        plan.category || 'general'
+      );
+    });
+
+    const outcomes = await Promise.allSettled(wavePromises);
+
+    // Reassemble results in original subtask order (allSettled preserves input order)
+    for (let i = 0; i < outcomes.length; i++) {
+      const outcome = outcomes[i];
+      if (outcome.status === 'fulfilled') {
+        results.push(outcome.value);
+      } else {
+        const failedSubtask = waveSubtasks[i];
+        console.error(`Execution failed on subtask ${failedSubtask.id}: ${outcome.reason?.message || outcome.reason}`);
         results.push({
-          subtaskId: subtask.id,
+          subtaskId: failedSubtask.id,
           modelUsed: null,
           wasFallback: false,
           output: null,
@@ -157,7 +211,7 @@ async function executePlan(plan, keyMap, availableModels) {
           latencyMs: 0,
           costUSD: 0,
           costINR: 0,
-          error: error.message
+          error: outcome.reason?.message || String(outcome.reason)
         });
       }
     }
@@ -168,7 +222,7 @@ async function executePlan(plan, keyMap, availableModels) {
     .map((r) => `### Step ${r.subtaskId} (${r.modelUsed})\n${r.output}`)
     .join('\n\n---\n\n');
 
-  return {
+  const executionResult = {
     subtaskResults: results,
     finalOutput,
     totalInputTokens: results.reduce((sum, r) => sum + (r.inputTokens || 0), 0),
@@ -178,6 +232,13 @@ async function executePlan(plan, keyMap, availableModels) {
     totalLatencyMs: results.reduce((sum, r) => sum + (r.latencyMs || 0), 0),
     status: results.every((r) => r.output) ? 'completed' : 'partial'
   };
+
+  // Write memorable facts only if the plan explicitly flagged them
+  if (sessionId && Array.isArray(plan.memorableFacts) && plan.memorableFacts.length > 0) {
+    await writeContext(sessionId, { facts: plan.memorableFacts });
+  }
+
+  return executionResult;
 }
 
 module.exports = {

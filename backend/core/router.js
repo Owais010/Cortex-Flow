@@ -21,14 +21,16 @@ Return ONLY valid JSON in this exact shape:
       "prompt": "subtask prompt",
       "dependsOn": []
     }
-  ]
+  ],
+  "memorableFacts": ["(optional) short fact strings worth remembering across future turns"]
 }
 Rules:
 - Use only models listed in availableModels.
 - If prompt is simple, return 1 subtask with needsDecomposition=false.
 - Keep subtasks concise and execution-ready.
 - ALWAYS provide decompositionReasoning and modelReasoning — these help users understand your routing decisions.
-- Use dependsOn to list subtask IDs that must complete before this one starts.`;
+- Use dependsOn to list subtask IDs that must complete before this one starts.
+- Only include memorableFacts if the user's request reveals important preferences, constraints, or domain facts worth persisting across turns. Omit the field entirely if there is nothing notable to remember.`;
 
 function modelToProvider(model) {
   const m = String(model || '').toLowerCase();
@@ -123,13 +125,42 @@ function normalizePlan(plan, prompt, availableModels) {
     };
   });
 
-  return {
+  // Compute wave assignments from the dependency graph.
+  // A subtask with no dependencies is wave 0; otherwise wave = max(dep waves) + 1.
+  const waveOf = {};
+  function computeWave(taskId, visited = new Set()) {
+    if (waveOf[taskId] !== undefined) return waveOf[taskId];
+    if (visited.has(taskId)) return 0; // cycle guard
+    visited.add(taskId);
+    const task = subtasks.find(t => t.id === taskId);
+    if (!task || task.dependsOn.length === 0) {
+      waveOf[taskId] = 0;
+      return 0;
+    }
+    const maxDepWave = Math.max(...task.dependsOn.map(depId => computeWave(depId, visited)));
+    waveOf[taskId] = maxDepWave + 1;
+    return waveOf[taskId];
+  }
+  for (const task of subtasks) {
+    computeWave(task.id);
+    task.wave = waveOf[task.id];
+  }
+
+  const normalized = {
     category,
     difficulty,
     needsDecomposition: Boolean(plan?.needsDecomposition ?? (subtasks.length > 1)),
     decompositionReasoning: plan?.decompositionReasoning || null,
     subtasks
   };
+
+  // Pass through memorableFacts only if the router returned a non-empty array.
+  // Its absence is the signal that tells the executor there's nothing to persist.
+  if (Array.isArray(plan?.memorableFacts) && plan.memorableFacts.length > 0) {
+    normalized.memorableFacts = plan.memorableFacts.map(String);
+  }
+
+  return normalized;
 }
 
 function safeJsonParse(text) {
@@ -178,7 +209,7 @@ async function routeWithGemini(model, apiKey, prompt, availableModels) {
   return safeJsonParse(text);
 }
 
-async function generatePlan(prompt, availableModels, sessionId) {
+async function generatePlan(prompt, availableModels, sessionId, conversationHistory = [], sharedContext = { facts: [], decisions: [] }) {
   if (!prompt || typeof prompt !== 'string') {
     throw new Error('prompt is required');
   }
@@ -189,6 +220,24 @@ async function generatePlan(prompt, availableModels, sessionId) {
     throw new Error('sessionId is required');
   }
 
+  // Build contextual prompt: known context → conversation history → current request
+  let contextualPrompt = prompt;
+
+  // Prepend conversation history if present
+  if (Array.isArray(conversationHistory) && conversationHistory.length > 0) {
+    const recentHistory = conversationHistory.slice(-5);
+    const historyLines = recentHistory.map((entry, idx) =>
+      `Turn ${idx + 1} — user: ${entry.prompt}, summary: ${entry.resultSummary}`
+    );
+    contextualPrompt = `Conversation so far:\n${historyLines.join('\n')}\n\n${contextualPrompt}`;
+  }
+
+  // Prepend known facts if present (placed BEFORE history in final output)
+  const facts = Array.isArray(sharedContext?.facts) ? sharedContext.facts : [];
+  if (facts.length > 0) {
+    contextualPrompt = `Known context:\n${facts.join('\n')}\n\n${contextualPrompt}`;
+  }
+
   const modelIds = normalizeModelIds(availableModels);
   const routingModel = choosePreferredModel(modelIds);
   const provider = modelToProvider(routingModel);
@@ -197,11 +246,11 @@ async function generatePlan(prompt, availableModels, sessionId) {
   try {
     const decryptedKey = await getProviderKey(sessionId, provider);
     if (provider === 'openai') {
-      llmPlan = await routeWithOpenAI(routingModel, decryptedKey, prompt, modelIds);
+      llmPlan = await routeWithOpenAI(routingModel, decryptedKey, contextualPrompt, modelIds);
     } else if (provider === 'anthropic') {
-      llmPlan = await routeWithAnthropic(routingModel, decryptedKey, prompt, modelIds);
+      llmPlan = await routeWithAnthropic(routingModel, decryptedKey, contextualPrompt, modelIds);
     } else {
-      llmPlan = await routeWithGemini(routingModel, decryptedKey, prompt, modelIds);
+      llmPlan = await routeWithGemini(routingModel, decryptedKey, contextualPrompt, modelIds);
     }
   } catch (_routingError) {
     llmPlan = null;

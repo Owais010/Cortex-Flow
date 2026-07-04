@@ -90,6 +90,7 @@ export interface Plan {
   subtasks: Subtask[];
   totalEstimate: PlanEstimate;
   planVersion?: number;
+  memorableFacts?: string[];
 }
 
 // ============================================
@@ -107,6 +108,7 @@ export interface SubtaskResult {
   usedFallback?: boolean;
   confidenceScore?: number;
   confidenceNote?: string;
+  error?: string;
 }
 
 export interface ExecutionAnalytics {
@@ -155,7 +157,7 @@ export interface ExecutingMessageData extends BaseMessage {
   type: 'executing';
   plan: Plan;
   completedSubtasks: number[];
-  runningSubtask: number | null;
+  runningSubtasks: number[];
   failedSubtasks: number[];
 }
 
@@ -193,6 +195,16 @@ export interface Chat {
 // App State
 // ============================================
 
+export interface ConversationHistoryEntry {
+  prompt: string;
+  resultSummary: string;
+}
+
+export interface SharedContext {
+  facts: string[];
+  decisions: string[];
+}
+
 export interface AppState {
   sessionId: string;
   connectedProviders: ConnectedProvider[];
@@ -202,4 +214,6 @@ export interface AppState {
   isLoading: boolean;
   isExecuting: boolean;
   backendOnline: boolean;
+  conversationHistory: ConversationHistoryEntry[];
+  sharedContext: SharedContext;
 }

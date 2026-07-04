@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { ChevronDown, ChevronRight, AlertTriangle } from 'lucide-react';
+import { ChevronDown, ChevronRight, AlertTriangle, XCircle } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { ResultMessageData, SubtaskResult } from '../../lib/types';
@@ -9,6 +9,7 @@ import { formatCost, formatTokens, formatLatency, getModelColor } from '../../li
 
 function SubtaskDetail({ result }: { result: SubtaskResult }) {
   const [open, setOpen] = useState(false);
+  const isFailed = !result.output || !!result.error;
 
   const confidenceColor = (result.confidenceScore ?? 0) >= 80
     ? 'var(--success)'
@@ -17,7 +18,7 @@ function SubtaskDetail({ result }: { result: SubtaskResult }) {
       : 'var(--error)';
 
   return (
-    <div className="subtask-detail">
+    <div className="subtask-detail" style={isFailed ? { borderLeft: '3px solid var(--error)', background: 'rgba(255, 59, 48, 0.05)' } : undefined}>
       <button className="subtask-detail-header" onClick={() => setOpen(!open)}>
         {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
         <span
@@ -27,6 +28,15 @@ function SubtaskDetail({ result }: { result: SubtaskResult }) {
           {result.model}
         </span>
         <span style={{ flex: 1 }}>{result.title}</span>
+        {isFailed && (
+          <span
+            className="badge"
+            style={{ color: 'var(--error)', borderColor: 'var(--error)', fontSize: 11 }}
+          >
+            <XCircle size={12} style={{ marginRight: 3 }} />
+            Failed
+          </span>
+        )}
         {result.usedFallback && (
           <span title="Fallback used"><AlertTriangle size={12} style={{ color: 'var(--warning)' }} /></span>
         )}
@@ -38,7 +48,19 @@ function SubtaskDetail({ result }: { result: SubtaskResult }) {
       </button>
       {open && (
         <div className="subtask-detail-body">
-          {result.confidenceScore !== undefined && (
+          {isFailed && result.error && (
+            <div className="subtask-detail-row">
+              <span className="subtask-detail-label" style={{ color: 'var(--error)' }}>❌ Error</span>
+              <span className="subtask-detail-value" style={{ color: 'var(--error)' }}>{result.error}</span>
+            </div>
+          )}
+          {isFailed && result.confidenceNote && (
+            <div className="subtask-detail-row">
+              <span className="subtask-detail-label" style={{ color: 'var(--error)' }}>Note</span>
+              <span className="subtask-detail-value" style={{ color: 'var(--error)' }}>{result.confidenceNote}</span>
+            </div>
+          )}
+          {!isFailed && result.confidenceScore !== undefined && (
             <>
               <div className="subtask-detail-row">
                 <span className="subtask-detail-label">Confidence</span>
@@ -54,7 +76,7 @@ function SubtaskDetail({ result }: { result: SubtaskResult }) {
               </div>
             </>
           )}
-          {result.confidenceNote && (
+          {!isFailed && result.confidenceNote && (
             <div className="subtask-detail-row">
               <span className="subtask-detail-label">Note</span>
               <span className="subtask-detail-value">{result.confidenceNote}</span>

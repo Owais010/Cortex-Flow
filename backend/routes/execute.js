@@ -149,7 +149,7 @@ router.post('/', validate(executeSchema), async (req, res, next) => {
       return res.status(400).json({ error: 'No models available' });
     }
 
-    const result = await executePlan(resolvedPlan, keyMap, availableModels);
+    const result = await executePlan(resolvedPlan, keyMap, availableModels, session_id);
     const response = normalizeExecutionResult(resolvedPlanId, resolvedPlan, result);
 
     await insertExecutionRecord({

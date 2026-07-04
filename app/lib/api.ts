@@ -1,4 +1,4 @@
-import type { ConnectedProvider, AvailableModel, Plan, ExecutionResult } from './types';
+import type { ConnectedProvider, AvailableModel, Plan, ExecutionResult, ConversationHistoryEntry, SharedContext } from './types';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -50,7 +50,9 @@ export async function getModels(sessionId: string): Promise<AvailableModel[]> {
 export async function generatePlan(
   prompt: string,
   availableModels: string[],
-  sessionId: string
+  sessionId: string,
+  conversationHistory: ConversationHistoryEntry[] = [],
+  sharedContext: SharedContext = { facts: [], decisions: [] }
 ): Promise<Plan> {
   const res = await fetch(`${API_BASE}/api/plan`, {
     method: 'POST',
@@ -59,6 +61,8 @@ export async function generatePlan(
       session_id: sessionId,
       prompt,
       available_models: availableModels,
+      conversation_history: conversationHistory,
+      shared_context: sharedContext,
     }),
   });
   if (!res.ok) {
