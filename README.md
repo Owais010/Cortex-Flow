@@ -79,4 +79,3 @@ The backend is a lightweight, high-performance Node.js server that acts as the o
 4. Access the application at `http://localhost:3000`.
 
 ---
-*Built for the BYO-LLM Hackathon · 2026*

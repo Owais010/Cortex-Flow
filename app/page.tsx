@@ -195,7 +195,6 @@ export default function HomePage() {
       {/* Footer */}
       <footer className="landing-footer">
         <span className="landing-footer-logo">CORTEX FLOW</span>
-        <span className="landing-footer-text">Built for the BYO-LLM Hackathon · 2026</span>
       </footer>
     </div>
   );
