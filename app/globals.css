@@ -1360,7 +1360,7 @@ html {
 
 .btn-primary {
   background: linear-gradient(135deg, var(--accent-1), var(--accent-2));
-  color: #fff;
+  color: #050505 !important;
   border: none;
   border-radius: 8px;
   padding: 8px 20px;
@@ -1979,7 +1979,7 @@ html {
   align-items: center;
   gap: 8px;
   background: linear-gradient(135deg, var(--accent-1), var(--accent-2));
-  color: #fff;
+  color: #050505 !important;
   text-decoration: none;
   padding: 14px 32px;
   border-radius: 10px;
