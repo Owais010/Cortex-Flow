@@ -76,7 +76,7 @@ export default function LoginPage() {
         </Link>
 
         <div className="login-header">
-          <h1 className="login-logo">AGENT ASCEND</h1>
+          <h1 className="login-logo">Cortex Flow</h1>
           <p className="login-subtitle">
             {isSignUp ? 'Create your account' : 'Sign in to continue'}
           </p>

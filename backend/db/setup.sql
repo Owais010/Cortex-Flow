@@ -1,5 +1,5 @@
 -- ============================================
--- Agent Ascend: Database Setup
+-- Cortex Flow: Database Setup
 -- Run this in Supabase SQL Editor
 -- ============================================
 

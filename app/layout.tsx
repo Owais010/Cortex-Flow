@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Agent Ascend — BYO-LLM Orchestrator",
+  title: "Cortex Flow — BYO-LLM Orchestrator",
   description: "Intelligent multi-model AI orchestration platform. Bring your own LLM keys, route tasks to the best models.",
 };
 

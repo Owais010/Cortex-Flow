@@ -1,6 +1,6 @@
 # Backend Implementation Plan - M1 Backend Engineer
 
-**Project:** Agent Ascend / BYO-LLM Orchestrator  
+**Project:** Cortex Flow / BYO-LLM Orchestrator  
 **Backend folder:** `backend/`  
 **Product docs folder:** `Product_Details/`  
 **Updated for current repo state:** 2026-05-09
@@ -9,7 +9,7 @@
 
 ## 1. Product Picture
 
-Agent Ascend is a bring-your-own-key multi-LLM orchestration app.
+Cortex Flow is a bring-your-own-key multi-LLM orchestration app.
 
 The target flow is:
 

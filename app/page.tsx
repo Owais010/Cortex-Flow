@@ -6,7 +6,7 @@ export default function HomePage() {
     <div className="landing">
       {/* Navigation */}
       <nav className="landing-nav">
-        <span className="landing-nav-logo">AGENT ASCEND</span>
+        <span className="landing-nav-logo">Cortex Flow</span>
         <div className="landing-nav-links">
           <a href="#features" className="landing-nav-link">Features</a>
           <a href="#how-it-works" className="landing-nav-link">How It Works</a>
@@ -24,7 +24,7 @@ export default function HomePage() {
           <span className="landing-hero-accent">right AI model</span>
         </h1>
         <p className="landing-hero-desc">
-          Agent Ascend intelligently analyzes your tasks and distributes them across
+          Cortex Flow intelligently analyzes your tasks and distributes them across
           multiple AI models — GPT-4o, Claude Sonnet, Gemini — for faster, cheaper,
           and better results. Bring your own API keys. We never store them in plain text.
         </p>
@@ -56,7 +56,7 @@ export default function HomePage() {
 
       {/* Features */}
       <section className="landing-features" id="features">
-        <h2 className="landing-section-title">Why Agent Ascend?</h2>
+        <h2 className="landing-section-title">Why Cortex Flow?</h2>
         <p className="landing-section-desc">
           Stop sending every prompt to one model. Different tasks need different AI strengths.
         </p>
@@ -156,7 +156,7 @@ export default function HomePage() {
 
       {/* Footer */}
       <footer className="landing-footer">
-        <span className="landing-footer-logo">AGENT ASCEND</span>
+        <span className="landing-footer-logo">Cortex Flow</span>
         <span className="landing-footer-text">Built for the BYO-LLM Hackathon · 2026</span>
       </footer>
     </div>

@@ -22,7 +22,7 @@ export default function Topbar() {
 
   return (
     <div className="topbar">
-      <div className="topbar-logo">AGENT ASCEND</div>
+      <div className="topbar-logo">Cortex Flow</div>
       <div className="topbar-right">
         {!backendOnline && (
           <span style={{ fontSize: 11, color: 'var(--error)' }}>Backend offline</span>

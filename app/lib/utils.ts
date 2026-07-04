@@ -109,10 +109,10 @@ export function getModelColor(model: string): string {
  */
 export function getSessionId(): string {
   if (typeof window === 'undefined') return generateId();
-  let sessionId = localStorage.getItem('agent_ascend_session_id');
+  let sessionId = localStorage.getItem('cortex_flow_session_id');
   if (!sessionId) {
     sessionId = generateId();
-    localStorage.setItem('agent_ascend_session_id', sessionId);
+    localStorage.setItem('cortex_flow_session_id', sessionId);
   }
   return sessionId;
 }

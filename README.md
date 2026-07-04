@@ -1,6 +1,6 @@
-# Agent Ascend: Multi-Model AI Orchestrator
+# Cortex Flow: Multi-Model AI Orchestrator
 
-Agent Ascend is an intelligent, multi-agent LLM orchestration platform that dynamically analyzes user prompts and routes tasks to the most suitable AI models based on task category, reasoning complexity, token requirements, and execution cost. 
+Cortex Flow is an intelligent, multi-agent LLM orchestration platform that dynamically analyzes user prompts and routes tasks to the most suitable AI models based on task category, reasoning complexity, token requirements, and execution cost. 
 
 By utilizing a Bring-Your-Own-LLM (BYO-LLM) architecture, it intelligently distributes workloads across multiple optimized AI models (OpenAI, Anthropic, Google Gemini) rather than relying on a single generic LLM.
 
@@ -13,7 +13,7 @@ When a user submits a prompt, the system's Router LLM analyzes and classifies it
 - **Fast Tasks & Summaries** → Google Gemini (Gemini 1.5 Pro / Flash)
 
 ### 2. Task Decomposition Engine
-Large, complex prompts are expensive and slow when executed in a single inference. Agent Ascend automatically breaks down complex tasks into focused subtasks. Each subtask is assigned to a specialized AI agent, and the orchestrator later aggregates all outputs into one final, high-quality response.
+Large, complex prompts are expensive and slow when executed in a single inference. Cortex Flow automatically breaks down complex tasks into focused subtasks. Each subtask is assigned to a specialized AI agent, and the orchestrator later aggregates all outputs into one final, high-quality response.
 
 ### 3. Secure Key Vault (AES-256 Encryption)
 We prioritize security. Your API keys are encrypted with AES-256-GCM before database storage. 

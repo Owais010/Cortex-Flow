@@ -55,7 +55,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         messages: [{
           id: generateId(),
           type: 'system',
-          content: 'Welcome to Agent Ascend. Describe your task and I\'ll route it to the best AI models.',
+          content: 'Welcome to Cortex Flow. Describe your task and I\'ll route it to the best AI models.',
           timestamp: now(),
         }],
         createdAt: now(),
@@ -114,7 +114,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       messages: [{
         id: generateId(),
         type: 'system',
-        content: 'Welcome to Agent Ascend. Describe your task and I\'ll route it to the best AI models.',
+        content: 'Welcome to Cortex Flow. Describe your task and I\'ll route it to the best AI models.',
         timestamp: now(),
       }],
       createdAt: now(),
