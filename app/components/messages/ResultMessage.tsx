@@ -6,6 +6,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { ResultMessageData, SubtaskResult } from '../../lib/types';
 import { formatCost, formatTokens, formatLatency, getModelColor } from '../../lib/utils';
+import ReasoningGraph from '../ReasoningGraph';
 
 function SubtaskDetail({ result }: { result: SubtaskResult }) {
   const [open, setOpen] = useState(false);
@@ -112,8 +113,8 @@ function SubtaskDetail({ result }: { result: SubtaskResult }) {
 }
 
 export default function ResultMessage({ message }: { message: ResultMessageData }) {
-  const [tab, setTab] = useState<'response' | 'details'>('response');
-  const { result } = message;
+  const [tab, setTab] = useState<'response' | 'details' | 'graph'>('response');
+  const { result, plan } = message;
 
   return (
     <div className="msg-container">
@@ -130,6 +131,12 @@ export default function ResultMessage({ message }: { message: ResultMessageData 
             onClick={() => setTab('details')}
           >
             Details ({result.subtaskResults.length})
+          </button>
+          <button
+            className={`msg-result-tab ${tab === 'graph' ? 'active' : ''}`}
+            onClick={() => setTab('graph')}
+          >
+            Graph
           </button>
         </div>
 
@@ -160,6 +167,8 @@ export default function ResultMessage({ message }: { message: ResultMessageData 
               ))}
             </div>
           )}
+
+          {tab === 'graph' && <ReasoningGraph plan={plan} result={result} />}
         </div>
 
         <div className="msg-result-analytics">

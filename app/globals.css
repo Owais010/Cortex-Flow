@@ -3094,3 +3094,184 @@ body::after {
 .sidebar-footer {
   position: relative;
 }
+
+/* ============================================
+   Reasoning Graph (React Flow DAG visualizer)
+   ============================================ */
+.reasoning-graph {
+  width: 100%;
+  height: 440px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 30% 20%, rgba(255, 255, 255, 0.02), transparent 60%),
+    var(--bg-deep);
+}
+
+/* Fit React Flow's default (light) chrome into the dark UI */
+.reasoning-graph .react-flow__attribution {
+  display: none;
+}
+.reasoning-graph .react-flow__controls {
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: var(--glow-sm);
+}
+.reasoning-graph .react-flow__controls-button {
+  background: var(--bg-glass-strong);
+  border-bottom: 1px solid var(--border);
+  color: var(--text-primary);
+}
+.reasoning-graph .react-flow__controls-button:hover {
+  background: var(--bg-hover);
+}
+.reasoning-graph .react-flow__controls-button svg {
+  fill: var(--text-muted);
+}
+
+/* Edge stroke + animated dash flow */
+.reasoning-graph .react-flow__edge-path {
+  stroke-dasharray: 6;
+  animation: rg-dash 0.6s linear infinite;
+}
+@keyframes rg-dash {
+  to { stroke-dashoffset: -12; }
+}
+
+/* Shared node shell */
+.rg-node {
+  min-width: 160px;
+  max-width: 200px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--bg-glass-strong);
+  border: 1px solid var(--border);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  font-size: 12px;
+  color: var(--text-primary);
+  box-shadow: var(--glow-sm);
+  transition: box-shadow 0.3s ease, border-color 0.3s ease;
+  animation: rg-fade-in 0.4s ease both;
+}
+@keyframes rg-fade-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.rg-node .react-flow__handle {
+  width: 6px;
+  height: 6px;
+  background: var(--text-dim);
+  border: none;
+}
+
+.rg-node-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+/* Prompt node */
+.rg-node-prompt {
+  border-color: var(--accent-2);
+}
+.rg-node-prompt-text {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-primary);
+}
+
+/* Router node */
+.rg-node-router {
+  border-color: var(--accent-3);
+  text-align: center;
+}
+.rg-node-badges {
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+.rg-badge {
+  font-size: 10px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  text-transform: capitalize;
+}
+.rg-node-sub {
+  margin-top: 5px;
+  font-size: 10px;
+  color: var(--accent-solid);
+}
+
+/* Subtask card */
+.rg-node-subtask {
+  border-left: 3px solid var(--text-muted);
+  text-align: left;
+}
+.rg-node-subtask-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 5px;
+}
+.rg-model-badge {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 5px;
+  border: 1px solid;
+  opacity: 0.9;
+}
+.rg-fallback {
+  font-size: 11px;
+  color: var(--warning);
+}
+.rg-node-subtask-title {
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--text-primary);
+}
+.rg-node-metrics {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+/* Output node */
+.rg-node-output {
+  border-color: var(--accent-2);
+  text-align: center;
+}
+.rg-node-output-status {
+  font-size: 12px;
+  text-transform: capitalize;
+  color: var(--text-primary);
+}
+
+/* ---- Status glows (shared by subtask + output) ---- */
+.rg-node.complete {
+  border-color: var(--success);
+  box-shadow: 0 0 18px rgba(0, 230, 118, 0.25);
+}
+.rg-node.failed {
+  border-color: var(--error);
+  box-shadow: 0 0 18px rgba(255, 82, 82, 0.28);
+}
+.rg-node.running {
+  border-color: var(--warning);
+  animation: rg-pulse 1.4s ease-in-out infinite;
+}
+@keyframes rg-pulse {
+  0%, 100% { box-shadow: 0 0 10px rgba(255, 171, 64, 0.2); }
+  50% { box-shadow: 0 0 22px rgba(255, 171, 64, 0.5); }
+}
