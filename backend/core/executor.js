@@ -126,7 +126,22 @@ async function executePlan(plan, keyMap, availableModels) {
   const results = [];
 
   for (const waveIndex of waves) {
-    for (const subtask of waveMap[waveIndex]) {
+    // Step 1: Validate wave independence — no subtask may depend on a sibling in the same wave
+    const waveSubtasks = waveMap[waveIndex];
+    const waveIds = new Set(waveSubtasks.map((s) => s.id));
+    for (const subtask of waveSubtasks) {
+      const deps = subtask.dependsOn || [];
+      for (const depId of deps) {
+        if (waveIds.has(depId)) {
+          throw new Error(
+            `Wave ${waveIndex} contains an intra-wave dependency: subtask ${subtask.id} depends on subtask ${depId}, but both are in the same wave. Dependent tasks must be in a later wave.`
+          );
+        }
+      }
+    }
+
+    // Step 2: Execute all subtasks in this wave concurrently (they are verified independent)
+    const wavePromises = waveSubtasks.map((subtask) => {
       const deps = subtask.dependsOn || [];
       const priorOutputs = results
         .filter((r) => deps.includes(r.subtaskId))
@@ -137,18 +152,26 @@ async function executePlan(plan, keyMap, availableModels) {
         ? `Context from previous steps:\n${priorOutputs}\n\nYour task:\n${subtask.prompt}`
         : subtask.prompt;
 
-      try {
-        const result = await executeSubtask(
-          { ...subtask, prompt: enrichedPrompt },
-          availableModels,
-          keyMap,
-          plan.category || 'general'
-        );
-        results.push(result);
-      } catch (error) {
-        console.error(`Execution failed on subtask ${subtask.id}: ${error.message}`);
+      return executeSubtask(
+        { ...subtask, prompt: enrichedPrompt },
+        availableModels,
+        keyMap,
+        plan.category || 'general'
+      );
+    });
+
+    const outcomes = await Promise.allSettled(wavePromises);
+
+    // Reassemble results in original subtask order (allSettled preserves input order)
+    for (let i = 0; i < outcomes.length; i++) {
+      const outcome = outcomes[i];
+      if (outcome.status === 'fulfilled') {
+        results.push(outcome.value);
+      } else {
+        const failedSubtask = waveSubtasks[i];
+        console.error(`Execution failed on subtask ${failedSubtask.id}: ${outcome.reason?.message || outcome.reason}`);
         results.push({
-          subtaskId: subtask.id,
+          subtaskId: failedSubtask.id,
           modelUsed: null,
           wasFallback: false,
           output: null,
@@ -157,7 +180,7 @@ async function executePlan(plan, keyMap, availableModels) {
           latencyMs: 0,
           costUSD: 0,
           costINR: 0,
-          error: error.message
+          error: outcome.reason?.message || String(outcome.reason)
         });
       }
     }

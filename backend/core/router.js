@@ -178,7 +178,7 @@ async function routeWithGemini(model, apiKey, prompt, availableModels) {
   return safeJsonParse(text);
 }
 
-async function generatePlan(prompt, availableModels, sessionId) {
+async function generatePlan(prompt, availableModels, sessionId, conversationHistory = []) {
   if (!prompt || typeof prompt !== 'string') {
     throw new Error('prompt is required');
   }
@@ -189,6 +189,16 @@ async function generatePlan(prompt, availableModels, sessionId) {
     throw new Error('sessionId is required');
   }
 
+  // Step 4: Build contextual prompt from conversation history (last 5 turns)
+  let contextualPrompt = prompt;
+  if (Array.isArray(conversationHistory) && conversationHistory.length > 0) {
+    const recentHistory = conversationHistory.slice(-5);
+    const historyLines = recentHistory.map((entry, idx) =>
+      `Turn ${idx + 1} — user: ${entry.prompt}, summary: ${entry.resultSummary}`
+    );
+    contextualPrompt = `Conversation so far:\n${historyLines.join('\n')}\n\n${prompt}`;
+  }
+
   const modelIds = normalizeModelIds(availableModels);
   const routingModel = choosePreferredModel(modelIds);
   const provider = modelToProvider(routingModel);
@@ -197,11 +207,11 @@ async function generatePlan(prompt, availableModels, sessionId) {
   try {
     const decryptedKey = await getProviderKey(sessionId, provider);
     if (provider === 'openai') {
-      llmPlan = await routeWithOpenAI(routingModel, decryptedKey, prompt, modelIds);
+      llmPlan = await routeWithOpenAI(routingModel, decryptedKey, contextualPrompt, modelIds);
     } else if (provider === 'anthropic') {
-      llmPlan = await routeWithAnthropic(routingModel, decryptedKey, prompt, modelIds);
+      llmPlan = await routeWithAnthropic(routingModel, decryptedKey, contextualPrompt, modelIds);
     } else {
-      llmPlan = await routeWithGemini(routingModel, decryptedKey, prompt, modelIds);
+      llmPlan = await routeWithGemini(routingModel, decryptedKey, contextualPrompt, modelIds);
     }
   } catch (_routingError) {
     llmPlan = null;
