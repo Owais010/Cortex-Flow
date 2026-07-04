@@ -6,6 +6,7 @@ const { getFallbackOrder } = require('./fallback');
 const { getProviderForModel } = require('../db/models');
 const vault = require('../security/vault');
 const { computeActualCost } = require('./token_counter');
+const { readContext, writeContext } = require('./memory');
 
 async function callLLMProvider(provider, modelId, apiKey, prompt) {
   if (provider === 'anthropic') {
@@ -114,7 +115,7 @@ async function executeSubtask(subtask, availableModels, keyMap, category) {
   throw new Error(`All models failed for subtask ${subtask.id}. Reasons: ${errors.join(', ')}`);
 }
 
-async function executePlan(plan, keyMap, availableModels) {
+async function executePlan(plan, keyMap, availableModels, sessionId) {
   const waveMap = {};
   for (const subtask of plan.subtasks || []) {
     const wave = subtask.wave || 0;
@@ -124,6 +125,15 @@ async function executePlan(plan, keyMap, availableModels) {
 
   const waves = Object.keys(waveMap).map(Number).sort((a, b) => a - b);
   const results = [];
+
+  // Read session context once at the start (only if sessionId is provided)
+  let factsBlock = '';
+  if (sessionId) {
+    const context = await readContext(sessionId);
+    if (context.facts.length > 0) {
+      factsBlock = `Known context:\n${context.facts.join('\n')}\n\n`;
+    }
+  }
 
   for (const waveIndex of waves) {
     // Step 1: Validate wave independence — no subtask may depend on a sibling in the same wave
@@ -148,9 +158,9 @@ async function executePlan(plan, keyMap, availableModels) {
         .map((r) => `[Output from subtask ${r.subtaskId}]\n${r.output}`)
         .join('\n\n');
 
-      const enrichedPrompt = priorOutputs
+      const enrichedPrompt = factsBlock + (priorOutputs
         ? `Context from previous steps:\n${priorOutputs}\n\nYour task:\n${subtask.prompt}`
-        : subtask.prompt;
+        : subtask.prompt);
 
       return executeSubtask(
         { ...subtask, prompt: enrichedPrompt },
@@ -191,7 +201,7 @@ async function executePlan(plan, keyMap, availableModels) {
     .map((r) => `### Step ${r.subtaskId} (${r.modelUsed})\n${r.output}`)
     .join('\n\n---\n\n');
 
-  return {
+  const executionResult = {
     subtaskResults: results,
     finalOutput,
     totalInputTokens: results.reduce((sum, r) => sum + (r.inputTokens || 0), 0),
@@ -201,6 +211,13 @@ async function executePlan(plan, keyMap, availableModels) {
     totalLatencyMs: results.reduce((sum, r) => sum + (r.latencyMs || 0), 0),
     status: results.every((r) => r.output) ? 'completed' : 'partial'
   };
+
+  // Write memorable facts only if the plan explicitly flagged them
+  if (sessionId && Array.isArray(plan.memorableFacts) && plan.memorableFacts.length > 0) {
+    await writeContext(sessionId, { facts: plan.memorableFacts });
+  }
+
+  return executionResult;
 }
 
 module.exports = {

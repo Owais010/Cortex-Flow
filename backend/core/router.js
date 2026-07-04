@@ -21,14 +21,16 @@ Return ONLY valid JSON in this exact shape:
       "prompt": "subtask prompt",
       "dependsOn": []
     }
-  ]
+  ],
+  "memorableFacts": ["(optional) short fact strings worth remembering across future turns"]
 }
 Rules:
 - Use only models listed in availableModels.
 - If prompt is simple, return 1 subtask with needsDecomposition=false.
 - Keep subtasks concise and execution-ready.
 - ALWAYS provide decompositionReasoning and modelReasoning — these help users understand your routing decisions.
-- Use dependsOn to list subtask IDs that must complete before this one starts.`;
+- Use dependsOn to list subtask IDs that must complete before this one starts.
+- Only include memorableFacts if the user's request reveals important preferences, constraints, or domain facts worth persisting across turns. Omit the field entirely if there is nothing notable to remember.`;
 
 function modelToProvider(model) {
   const m = String(model || '').toLowerCase();
@@ -123,13 +125,21 @@ function normalizePlan(plan, prompt, availableModels) {
     };
   });
 
-  return {
+  const normalized = {
     category,
     difficulty,
     needsDecomposition: Boolean(plan?.needsDecomposition ?? (subtasks.length > 1)),
     decompositionReasoning: plan?.decompositionReasoning || null,
     subtasks
   };
+
+  // Pass through memorableFacts only if the router returned a non-empty array.
+  // Its absence is the signal that tells the executor there's nothing to persist.
+  if (Array.isArray(plan?.memorableFacts) && plan.memorableFacts.length > 0) {
+    normalized.memorableFacts = plan.memorableFacts.map(String);
+  }
+
+  return normalized;
 }
 
 function safeJsonParse(text) {
@@ -178,7 +188,7 @@ async function routeWithGemini(model, apiKey, prompt, availableModels) {
   return safeJsonParse(text);
 }
 
-async function generatePlan(prompt, availableModels, sessionId, conversationHistory = []) {
+async function generatePlan(prompt, availableModels, sessionId, conversationHistory = [], sharedContext = { facts: [], decisions: [] }) {
   if (!prompt || typeof prompt !== 'string') {
     throw new Error('prompt is required');
   }
@@ -189,14 +199,22 @@ async function generatePlan(prompt, availableModels, sessionId, conversationHist
     throw new Error('sessionId is required');
   }
 
-  // Step 4: Build contextual prompt from conversation history (last 5 turns)
+  // Build contextual prompt: known context → conversation history → current request
   let contextualPrompt = prompt;
+
+  // Prepend conversation history if present
   if (Array.isArray(conversationHistory) && conversationHistory.length > 0) {
     const recentHistory = conversationHistory.slice(-5);
     const historyLines = recentHistory.map((entry, idx) =>
       `Turn ${idx + 1} — user: ${entry.prompt}, summary: ${entry.resultSummary}`
     );
-    contextualPrompt = `Conversation so far:\n${historyLines.join('\n')}\n\n${prompt}`;
+    contextualPrompt = `Conversation so far:\n${historyLines.join('\n')}\n\n${contextualPrompt}`;
+  }
+
+  // Prepend known facts if present (placed BEFORE history in final output)
+  const facts = Array.isArray(sharedContext?.facts) ? sharedContext.facts : [];
+  if (facts.length > 0) {
+    contextualPrompt = `Known context:\n${facts.join('\n')}\n\n${contextualPrompt}`;
   }
 
   const modelIds = normalizeModelIds(availableModels);
