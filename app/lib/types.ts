@@ -153,12 +153,25 @@ export interface PlanMessageData extends BaseMessage {
   plan: Plan;
 }
 
+/** Live per-subtask metrics streamed during execution (feeds the live graph). */
+export interface LiveSubtaskResult {
+  id: number;
+  model: string;
+  status: 'running' | 'complete' | 'failed';
+  tokens?: number;
+  cost?: number;
+  latencyMs?: number;
+  wasFallback?: boolean;
+  error?: string;
+}
+
 export interface ExecutingMessageData extends BaseMessage {
   type: 'executing';
   plan: Plan;
   completedSubtasks: number[];
   runningSubtasks: number[];
   failedSubtasks: number[];
+  liveResults?: LiveSubtaskResult[];
 }
 
 export interface ResultMessageData extends BaseMessage {

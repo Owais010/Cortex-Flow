@@ -16,6 +16,8 @@ import type {
   ConnectedProvider,
   Plan,
   ConversationHistoryEntry,
+  ExecutingMessageData,
+  LiveSubtaskResult,
 } from './types';
 import { generateId, now, truncate, getSessionId } from './utils';
 import { createClient } from './supabase';
@@ -441,19 +443,82 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     executingRef.current = true;
     setState(prev => ({ ...prev, isExecuting: true }));
 
-    const wave0Ids = plan.subtasks.filter(t => !t.dependsOn || t.dependsOn.length === 0).map(t => t.id);
     const execMsgId = generateId();
     const execMsg: Message = {
       id: execMsgId, type: 'executing', plan,
-      completedSubtasks: [], runningSubtasks: wave0Ids, failedSubtasks: [],
+      completedSubtasks: [], runningSubtasks: [], failedSubtasks: [], liveResults: [],
       timestamp: now(),
     };
     await addMessage(chatId, execMsg);
 
+    // Live, NON-persisted patcher for the executing message. We only write the
+    // final result to the DB — intermediate ticks stay in local state.
+    const patchExec = (fn: (m: ExecutingMessageData) => ExecutingMessageData) => {
+      setState(prev => ({
+        ...prev,
+        chats: prev.chats.map(c => c.id === chatId ? {
+          ...c,
+          messages: c.messages.map(m =>
+            (m.id === execMsgId && m.type === 'executing') ? fn(m as ExecutingMessageData) : m),
+        } : c),
+      }));
+    };
+
+    const upsertLive = (list: LiveSubtaskResult[], entry: LiveSubtaskResult): LiveSubtaskResult[] => {
+      const idx = list.findIndex(r => r.id === entry.id);
+      if (idx === -1) return [...list, entry];
+      const next = [...list];
+      next[idx] = { ...next[idx], ...entry };
+      return next;
+    };
+
     try {
       const currentChat = stateRef.current.chats.find(c => c.id === chatId);
       const conversationMemory = buildConversationHistory(currentChat);
-      const result = await api.executePlan(plan, state.sessionId, conversationMemory, state.sharedContext);
+
+      let gotEvents = false;
+      let result;
+      try {
+        result = await api.executePlanStream(
+          plan, state.sessionId, conversationMemory, state.sharedContext,
+          {
+            onSubtaskStart: ({ subtaskId, model }) => {
+              gotEvents = true;
+              patchExec(m => ({
+                ...m,
+                runningSubtasks: m.runningSubtasks.includes(subtaskId) ? m.runningSubtasks : [...m.runningSubtasks, subtaskId],
+                completedSubtasks: m.completedSubtasks.filter(id => id !== subtaskId),
+                failedSubtasks: m.failedSubtasks.filter(id => id !== subtaskId),
+                liveResults: upsertLive(m.liveResults ?? [], { id: subtaskId, model, status: 'running' }),
+              }));
+            },
+            onSubtaskComplete: ({ subtaskId, model, tokens, cost, latencyMs, wasFallback }) => {
+              gotEvents = true;
+              patchExec(m => ({
+                ...m,
+                runningSubtasks: m.runningSubtasks.filter(id => id !== subtaskId),
+                completedSubtasks: m.completedSubtasks.includes(subtaskId) ? m.completedSubtasks : [...m.completedSubtasks, subtaskId],
+                liveResults: upsertLive(m.liveResults ?? [], { id: subtaskId, model, status: 'complete', tokens, cost, latencyMs, wasFallback }),
+              }));
+            },
+            onSubtaskFailed: ({ subtaskId, error }) => {
+              gotEvents = true;
+              patchExec(m => ({
+                ...m,
+                runningSubtasks: m.runningSubtasks.filter(id => id !== subtaskId),
+                failedSubtasks: m.failedSubtasks.includes(subtaskId) ? m.failedSubtasks : [...m.failedSubtasks, subtaskId],
+                liveResults: upsertLive(m.liveResults ?? [], { id: subtaskId, model: '', status: 'failed', error }),
+              }));
+            },
+          },
+        );
+      } catch (streamErr) {
+        // If the stream never produced any events, the endpoint is likely
+        // unavailable (old backend). Fall back to the batch executor once.
+        if (gotEvents) throw streamErr;
+        result = await api.executePlan(plan, state.sessionId, conversationMemory, state.sharedContext);
+      }
+
       setState(prev => ({
         ...prev,
         conversationHistory: [

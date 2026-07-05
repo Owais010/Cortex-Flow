@@ -14,7 +14,7 @@ import {
   type NodeTypes,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import type { Plan, ExecutionResult, Subtask, SubtaskResult } from '../lib/types';
+import type { Plan, ExecutionResult, Subtask, SubtaskResult, LiveSubtaskResult } from '../lib/types';
 import {
   getModelColor,
   getProviderColor,
@@ -162,13 +162,33 @@ function statusFor(result: SubtaskResult | undefined): SubtaskStatus {
 }
 
 // ============================================
+// Live execution state (streamed)
+// ============================================
+export interface GraphLiveState {
+  running: number[];
+  completed: number[];
+  failed: number[];
+  results?: LiveSubtaskResult[];
+}
+
+// ============================================
 // Graph builder
 // ============================================
-function buildGraph(plan: Plan, result?: ExecutionResult): { nodes: Node[]; edges: Edge[] } {
+function buildGraph(plan: Plan, result?: ExecutionResult, live?: GraphLiveState): { nodes: Node[]; edges: Edge[] } {
   const subtasks = plan.subtasks ?? [];
   const resultById = new Map<number, SubtaskResult>(
     (result?.subtaskResults ?? []).map((r) => [r.id, r]),
   );
+  const liveById = new Map<number, LiveSubtaskResult>(
+    (live?.results ?? []).map((r) => [r.id, r]),
+  );
+  const liveStatusOf = (id: number): SubtaskStatus | undefined => {
+    if (!live) return undefined;
+    if (live.failed.includes(id)) return 'failed';
+    if (live.completed.includes(id)) return 'complete';
+    if (live.running.includes(id)) return 'running';
+    return 'pending';
+  };
 
   const waveOf = computeWaves(subtasks);
   const maxWave = subtasks.reduce((m, s) => Math.max(m, waveOf.get(s.id) ?? 0), 0);
@@ -212,22 +232,25 @@ function buildGraph(plan: Plan, result?: ExecutionResult): { nodes: Node[]; edge
     const siblings = byWave.get(w)!;
     const idx = siblings.indexOf(s);
     const res = resultById.get(s.id);
+    const lr = liveById.get(s.id);
+    const status = liveStatusOf(s.id) ?? statusFor(res);
+    const model = lr?.model || res?.model || s.assignedModel;
     nodes.push({
       id: `task-${s.id}`,
       type: 'subtask',
       position: { x: (w + 2) * COL_W, y: centerY(siblings.length, idx) },
       data: {
         title: s.title,
-        model: res?.model ?? s.assignedModel,
-        status: statusFor(res),
-        tokens: res?.tokens ?? s.estimatedTokens,
-        cost: res?.cost ?? s.estimatedCost,
-        latencyMs: res?.latencyMs,
-        usedFallback: res?.usedFallback,
+        model,
+        status,
+        tokens: lr?.tokens ?? res?.tokens ?? s.estimatedTokens,
+        cost: lr?.cost ?? res?.cost ?? s.estimatedCost,
+        latencyMs: lr?.latencyMs ?? res?.latencyMs,
+        usedFallback: lr?.wasFallback ?? res?.usedFallback,
       } as SubtaskNodeData,
     });
 
-    const color = getProviderColor(modelToProvider(res?.model ?? s.assignedModel));
+    const color = getProviderColor(modelToProvider(model));
     const deps = (s.dependsOn ?? []).filter((d) => subtasks.some((t) => t.id === d));
     if (deps.length === 0) {
       // Wave-0 subtasks connect from the router.
@@ -238,20 +261,27 @@ function buildGraph(plan: Plan, result?: ExecutionResult): { nodes: Node[]; edge
   });
 
   // Output node at the far right.
-  const outputStatus: SubtaskStatus = result
-    ? result.status === 'completed'
-      ? 'complete'
-      : result.status === 'partial'
-        ? 'running'
-        : 'failed'
-    : 'pending';
+  let outputStatus: SubtaskStatus;
+  let outputLabel: string;
+  if (live) {
+    const allComplete = subtasks.length > 0 && subtasks.every((s) => live.completed.includes(s.id));
+    const anyActive = subtasks.some((s) => !live.completed.includes(s.id) && !live.failed.includes(s.id));
+    outputStatus = allComplete ? 'complete' : anyActive ? 'running' : 'failed';
+    outputLabel = allComplete ? 'completed' : anyActive ? 'executing…' : 'partial';
+  } else if (result) {
+    outputStatus = result.status === 'completed' ? 'complete' : result.status === 'partial' ? 'running' : 'failed';
+    outputLabel = result.status;
+  } else {
+    outputStatus = 'pending';
+    outputLabel = 'awaiting execution';
+  }
   nodes.push({
     id: 'output',
     type: 'output',
     position: { x: (outputWave + 2) * COL_W, y: -NODE_W / 4 },
     data: {
       status: outputStatus,
-      label: result ? result.status : 'awaiting execution',
+      label: outputLabel,
     } as OutputNodeData,
   });
 
@@ -284,8 +314,8 @@ function makeEdge(source: string, target: string, color: string): Edge {
 // ============================================
 // Public component
 // ============================================
-export default function ReasoningGraph({ plan, result }: { plan: Plan; result?: ExecutionResult }) {
-  const { nodes, edges } = useMemo(() => buildGraph(plan, result), [plan, result]);
+export default function ReasoningGraph({ plan, result, live }: { plan: Plan; result?: ExecutionResult; live?: GraphLiveState }) {
+  const { nodes, edges } = useMemo(() => buildGraph(plan, result, live), [plan, result, live]);
 
   return (
     <div className="reasoning-graph">
