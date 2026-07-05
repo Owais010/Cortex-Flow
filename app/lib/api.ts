@@ -219,6 +219,131 @@ export async function executePlan(
   return res.json();
 }
 
+// ============================================
+// Streaming execution (Server-Sent Events)
+// ============================================
+
+export interface SubtaskStartEvent {
+  subtaskId: number;
+  model: string;
+  wave: number;
+}
+export interface SubtaskCompleteEvent {
+  subtaskId: number;
+  model: string;
+  tokens: number;
+  cost: number;
+  latencyMs: number;
+  wasFallback: boolean;
+}
+export interface SubtaskFailedEvent {
+  subtaskId: number;
+  error: string;
+}
+
+export interface ExecuteStreamHandlers {
+  onStart?: (data: { planId: string; subtaskIds: number[] }) => void;
+  onWaveStart?: (data: { wave: number; subtaskIds: number[] }) => void;
+  onSubtaskStart?: (data: SubtaskStartEvent) => void;
+  onSubtaskComplete?: (data: SubtaskCompleteEvent) => void;
+  onSubtaskFailed?: (data: SubtaskFailedEvent) => void;
+}
+
+/**
+ * Execute a plan and receive live per-subtask progress via SSE.
+ * Resolves with the final ExecutionResult (from the `done` frame), or rejects
+ * on an `error` frame / network failure. Falls back-friendly: callers can catch
+ * and retry with the non-streaming executePlan().
+ */
+export async function executePlanStream(
+  plan: Plan,
+  sessionId: string,
+  conversationHistory: ConversationHistoryEntry[] = [],
+  sharedContext: SharedContext = { facts: [], decisions: [] },
+  handlers: ExecuteStreamHandlers = {},
+): Promise<ExecutionResult> {
+  const res = await fetch(`${API_BASE}/api/execute/stream`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      session_id: sessionId,
+      plan,
+      conversation_history: conversationHistory,
+      shared_context: sharedContext,
+    }),
+  });
+
+  if (!res.ok || !res.body) {
+    throw await parseError(res, 'Execution failed');
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let finalResult: ExecutionResult | null = null;
+  let streamError: string | null = null;
+
+  const dispatch = (event: string, data: unknown) => {
+    switch (event) {
+      case 'start':
+        handlers.onStart?.(data as { planId: string; subtaskIds: number[] });
+        break;
+      case 'wave_start':
+        handlers.onWaveStart?.(data as { wave: number; subtaskIds: number[] });
+        break;
+      case 'subtask_start':
+        handlers.onSubtaskStart?.(data as SubtaskStartEvent);
+        break;
+      case 'subtask_complete':
+        handlers.onSubtaskComplete?.(data as SubtaskCompleteEvent);
+        break;
+      case 'subtask_failed':
+        handlers.onSubtaskFailed?.(data as SubtaskFailedEvent);
+        break;
+      case 'done':
+        finalResult = data as ExecutionResult;
+        break;
+      case 'error':
+        streamError = (data as { error?: string })?.error || 'Execution failed';
+        break;
+    }
+  };
+
+  // Parse one SSE block ("event: x\ndata: {...}") into a dispatch call.
+  const handleBlock = (block: string) => {
+    let event = 'message';
+    const dataLines: string[] = [];
+    for (const line of block.split('\n')) {
+      if (line.startsWith('event:')) event = line.slice(6).trim();
+      else if (line.startsWith('data:')) dataLines.push(line.slice(5).trim());
+      // lines starting with ':' are comments/heartbeats — ignored
+    }
+    if (dataLines.length === 0) return;
+    try {
+      dispatch(event, JSON.parse(dataLines.join('\n')));
+    } catch {
+      /* ignore malformed frame */
+    }
+  };
+
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let sep: number;
+    while ((sep = buffer.indexOf('\n\n')) !== -1) {
+      const block = buffer.slice(0, sep);
+      buffer = buffer.slice(sep + 2);
+      if (block.trim()) handleBlock(block);
+    }
+  }
+  if (buffer.trim()) handleBlock(buffer);
+
+  if (streamError) throw new Error(streamError);
+  if (!finalResult) throw new Error('Execution ended without a result');
+  return finalResult;
+}
+
 /**
  * Edit a plan's subtasks (model, prompt, title) and get recalculated estimates
  */

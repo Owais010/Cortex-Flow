@@ -2964,13 +2964,6 @@ html {
   box-shadow: inset 3px 0 12px rgba(255, 255, 255, 0.025);
 }
 
-/* New chat button glow */
-.sidebar-new-chat {
-  background: rgba(255, 255, 255, 0.06);
-  border-color: rgba(255, 255, 255, 0.04);
-  color: var(--accent-solid);
-}
-
 .sidebar-new-chat:hover {
   background: rgba(255, 255, 255, 0.035);
   border-color: rgba(255, 255, 255, 0.3);
@@ -3266,19 +3259,23 @@ body::after {
 .reasoning-graph .react-flow__attribution {
   display: none;
 }
+
 .reasoning-graph .react-flow__controls {
   border-radius: 8px;
   overflow: hidden;
   box-shadow: var(--glow-sm);
 }
+
 .reasoning-graph .react-flow__controls-button {
   background: var(--bg-glass-strong);
   border-bottom: 1px solid var(--border);
   color: var(--text-primary);
 }
+
 .reasoning-graph .react-flow__controls-button:hover {
   background: var(--bg-hover);
 }
+
 .reasoning-graph .react-flow__controls-button svg {
   fill: var(--text-muted);
 }
@@ -3288,8 +3285,11 @@ body::after {
   stroke-dasharray: 6;
   animation: rg-dash 0.6s linear infinite;
 }
+
 @keyframes rg-dash {
-  to { stroke-dashoffset: -12; }
+  to {
+    stroke-dashoffset: -12;
+  }
 }
 
 /* Shared node shell */
@@ -3308,9 +3308,17 @@ body::after {
   transition: box-shadow 0.3s ease, border-color 0.3s ease;
   animation: rg-fade-in 0.4s ease both;
 }
+
 @keyframes rg-fade-in {
-  from { opacity: 0; transform: translateY(6px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .rg-node .react-flow__handle {
@@ -3332,6 +3340,7 @@ body::after {
 .rg-node-prompt {
   border-color: var(--accent-2);
 }
+
 .rg-node-prompt-text {
   font-size: 12px;
   line-height: 1.4;
@@ -3343,12 +3352,14 @@ body::after {
   border-color: var(--accent-3);
   text-align: center;
 }
+
 .rg-node-badges {
   display: flex;
   gap: 6px;
   justify-content: center;
   flex-wrap: wrap;
 }
+
 .rg-badge {
   font-size: 10px;
   padding: 2px 7px;
@@ -3357,6 +3368,7 @@ body::after {
   color: var(--text-muted);
   text-transform: capitalize;
 }
+
 .rg-node-sub {
   margin-top: 5px;
   font-size: 10px;
@@ -3368,12 +3380,14 @@ body::after {
   border-left: 3px solid var(--text-muted);
   text-align: left;
 }
+
 .rg-node-subtask-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   margin-bottom: 5px;
 }
+
 .rg-model-badge {
   font-family: var(--font-mono);
   font-size: 10px;
@@ -3382,15 +3396,18 @@ body::after {
   border: 1px solid;
   opacity: 0.9;
 }
+
 .rg-fallback {
   font-size: 11px;
   color: var(--warning);
 }
+
 .rg-node-subtask-title {
   font-size: 12px;
   line-height: 1.35;
   color: var(--text-primary);
 }
+
 .rg-node-metrics {
   display: flex;
   gap: 8px;
@@ -3405,6 +3422,7 @@ body::after {
   border-color: var(--accent-2);
   text-align: center;
 }
+
 .rg-node-output-status {
   font-size: 12px;
   text-transform: capitalize;
@@ -3416,15 +3434,25 @@ body::after {
   border-color: var(--success);
   box-shadow: 0 0 18px rgba(0, 230, 118, 0.25);
 }
+
 .rg-node.failed {
   border-color: var(--error);
   box-shadow: 0 0 18px rgba(255, 82, 82, 0.28);
 }
+
 .rg-node.running {
   border-color: var(--warning);
   animation: rg-pulse 1.4s ease-in-out infinite;
 }
+
 @keyframes rg-pulse {
-  0%, 100% { box-shadow: 0 0 10px rgba(255, 171, 64, 0.2); }
-  50% { box-shadow: 0 0 22px rgba(255, 171, 64, 0.5); }
+
+  0%,
+  100% {
+    box-shadow: 0 0 10px rgba(255, 171, 64, 0.2);
+  }
+
+  50% {
+    box-shadow: 0 0 22px rgba(255, 171, 64, 0.5);
+  }
 }

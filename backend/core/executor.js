@@ -156,7 +156,11 @@ function buildSessionMemoryBlock(conversationHistory = [], sharedContext = { fac
   return `${blocks.join('\n\n')}\n\nUse this session memory to resolve references like "it", "that", "previous response", and "summarize it".\n\n`;
 }
 
-async function executePlan(plan, keyMap, availableModels, sessionId, executionContext = {}) {
+async function executePlan(plan, keyMap, availableModels, sessionId, executionContext = {}, onEvent) {
+  // onEvent is an optional callback used for live streaming. It is called with
+  // { type, ... } payloads as subtasks start and settle. When omitted the
+  // function behaves exactly as before (single batched result).
+  const emit = typeof onEvent === 'function' ? onEvent : () => {};
   // Dynamically compute wave assignments to ensure dependent tasks are correctly ordered
   const subtasks = plan.subtasks || [];
   const waveOf = {};
@@ -215,6 +219,8 @@ async function executePlan(plan, keyMap, availableModels, sessionId, executionCo
     }
 
     // Step 2: Execute all subtasks in this wave concurrently (they are verified independent)
+    emit({ type: 'wave_start', wave: waveIndex, subtaskIds: waveSubtasks.map((s) => s.id) });
+
     const wavePromises = waveSubtasks.map((subtask) => {
       const deps = subtask.dependsOn || [];
       const priorOutputs = results
@@ -226,12 +232,36 @@ async function executePlan(plan, keyMap, availableModels, sessionId, executionCo
         ? `Context from previous steps:\n${priorOutputs}\n\nYour task:\n${subtask.prompt}`
         : subtask.prompt);
 
+      // Signal that this subtask is now running (its whole wave starts together).
+      emit({ type: 'subtask_start', subtaskId: subtask.id, model: subtask.assignedModel, wave: waveIndex });
+
       return executeSubtask(
         { ...subtask, prompt: enrichedPrompt },
         availableModels,
         keyMap,
         plan.category || 'general'
-      );
+      )
+        .then((value) => {
+          // Emit as soon as THIS subtask settles, not after the whole wave.
+          emit({
+            type: 'subtask_complete',
+            subtaskId: value.subtaskId,
+            model: value.modelUsed,
+            tokens: (value.inputTokens || 0) + (value.outputTokens || 0),
+            cost: value.costUSD || 0,
+            latencyMs: value.latencyMs || 0,
+            wasFallback: value.wasFallback || false,
+          });
+          return value;
+        })
+        .catch((error) => {
+          emit({
+            type: 'subtask_failed',
+            subtaskId: subtask.id,
+            error: error?.message || String(error),
+          });
+          throw error;
+        });
     });
 
     const outcomes = await Promise.allSettled(wavePromises);
