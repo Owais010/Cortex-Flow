@@ -44,15 +44,15 @@ INSERT INTO model_registry (model_id, provider, display_name, strengths, context
   -- OpenAI
   ('gpt-4o', 'openai', 'GPT-4o', ARRAY['reasoning', 'coding', 'analysis', 'multimodal'], 128000, 0.005, 0.015, 800, true, true),
   ('gpt-4o-mini', 'openai', 'GPT-4o Mini', ARRAY['fast', 'coding', 'general'], 128000, 0.00015, 0.0006, 400, true, true),
-  ('gpt-4-turbo', 'openai', 'GPT-4 Turbo', ARRAY['reasoning', 'analysis', 'coding'], 128000, 0.01, 0.03, 1200, true, true),
+  ('gpt-4.1', 'openai', 'GPT-4.1', ARRAY['reasoning', 'analysis', 'coding'], 128000, 0.01, 0.03, 1000, true, true),
   -- Anthropic
+  ('claude-sonnet-4-20250514', 'anthropic', 'Claude 4 Sonnet', ARRAY['coding', 'analysis', 'writing', 'reasoning'], 200000, 0.003, 0.015, 600, true, true),
+  ('claude-3-5-haiku-20241022', 'anthropic', 'Claude 3.5 Haiku', ARRAY['fast', 'general', 'summarization'], 200000, 0.0008, 0.004, 300, true, true),
   ('claude-3-5-sonnet-20241022', 'anthropic', 'Claude 3.5 Sonnet', ARRAY['coding', 'analysis', 'writing', 'reasoning'], 200000, 0.003, 0.015, 600, true, true),
-  ('claude-3-haiku-20240307', 'anthropic', 'Claude 3 Haiku', ARRAY['fast', 'general', 'summarization'], 200000, 0.00025, 0.00125, 300, true, true),
-  ('claude-3-opus-20240229', 'anthropic', 'Claude 3 Opus', ARRAY['complex-reasoning', 'research', 'analysis'], 200000, 0.015, 0.075, 2000, true, true),
   -- Google Gemini
-  ('gemini-1.5-pro', 'google_gemini', 'Gemini 1.5 Pro', ARRAY['reasoning', 'multimodal', 'long-context'], 2097152, 0.00125, 0.005, 900, true, true),
-  ('gemini-1.5-flash', 'google_gemini', 'Gemini 1.5 Flash', ARRAY['fast', 'general', 'multimodal'], 1048576, 0.000075, 0.0003, 250, true, true),
-  ('gemini-2.0-flash', 'google_gemini', 'Gemini 2.0 Flash', ARRAY['fast', 'reasoning', 'multimodal', 'coding'], 1048576, 0.0001, 0.0004, 200, true, true)
+  ('gemini-2.5-pro', 'google_gemini', 'Gemini 2.5 Pro', ARRAY['reasoning', 'multimodal', 'long-context', 'coding'], 1048576, 0.00125, 0.01, 800, true, true),
+  ('gemini-2.5-flash', 'google_gemini', 'Gemini 2.5 Flash', ARRAY['fast', 'reasoning', 'multimodal', 'coding'], 1048576, 0.000075, 0.0003, 150, true, true),
+  ('gemini-2.0-flash', 'google_gemini', 'Gemini 2.0 Flash', ARRAY['fast', 'general', 'multimodal'], 1048576, 0.0001, 0.0004, 200, true, true)
 ON CONFLICT (model_id) DO NOTHING;
 
 -- 4. Executions — analytics/audit log for each approved plan execution

@@ -23,14 +23,14 @@ export const PROVIDERS: ProviderConfig[] = [
   {
     name: 'anthropic',
     displayName: 'Anthropic',
-    description: 'Claude Sonnet, Claude Haiku',
+    description: 'Claude 4 Sonnet, Claude 3.5 Haiku',
     keyPrefix: 'sk-ant-',
     color: 'var(--anthropic)',
   },
   {
     name: 'google_gemini',
     displayName: 'Google Gemini',
-    description: 'Gemini 1.5 Pro, Gemini Flash',
+    description: 'Gemini 2.5 Pro, Gemini 2.5 Flash',
     keyPrefix: 'AI',
     color: 'var(--gemini)',
   },

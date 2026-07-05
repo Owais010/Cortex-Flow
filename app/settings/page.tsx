@@ -16,20 +16,36 @@ function ProviderCard({ providerName }: { providerName: ProviderName }) {
   const [apiKey, setApiKey] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isEditing, setIsEditing] = useState(false);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
   const handleConnect = async () => {
     if (!apiKey.trim()) return;
     setLoading(true);
     setError(null);
+    setSuccessMsg(null);
     try {
       await connectProvider(providerName, apiKey.trim());
       setApiKey('');
+      setIsEditing(false);
+      if (connected) {
+        setSuccessMsg('Key updated successfully');
+        setTimeout(() => setSuccessMsg(null), 3000);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to connect');
     } finally {
       setLoading(false);
     }
   };
+
+  const handleCancelEdit = () => {
+    setIsEditing(false);
+    setApiKey('');
+    setError(null);
+  };
+
+  const showInput = !connected || isEditing;
 
   return (
     <div className="provider-card">
@@ -39,32 +55,55 @@ function ProviderCard({ providerName }: { providerName: ProviderName }) {
       </div>
       <div className="provider-card-desc">{config.description}</div>
 
-      {connected ? (
-        <>
-          <div className="provider-card-connected">
-            ✓ Connected
+      {connected && !isEditing && (
+        <div className="provider-card-connected">
+          <div>
+            <span style={{ color: 'var(--success)' }}>✓ Connected</span>
             <span className="provider-card-hint">{connected.hint}</span>
           </div>
-        </>
-      ) : (
+          <button
+            className="btn-ghost btn-sm"
+            onClick={() => setIsEditing(true)}
+            style={{ marginTop: 8, fontSize: 12 }}
+          >
+            🔄 Switch Key
+          </button>
+        </div>
+      )}
+
+      {successMsg && (
+        <div style={{ fontSize: 12, color: 'var(--success)', marginTop: 4 }}>{successMsg}</div>
+      )}
+
+      {showInput && (
         <>
           <input
             type="password"
             className="provider-card-input"
-            placeholder={`Paste your ${config.displayName} API key`}
+            placeholder={connected ? `Paste new ${config.displayName} API key` : `Paste your ${config.displayName} API key`}
             value={apiKey}
             onChange={(e) => setApiKey(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleConnect()}
             disabled={loading || !backendOnline}
           />
-          <div className="provider-card-actions">
+          <div className="provider-card-actions" style={{ display: 'flex', gap: 8 }}>
+            {isEditing && (
+              <button
+                className="btn-ghost"
+                onClick={handleCancelEdit}
+                disabled={loading}
+                style={{ flex: 1 }}
+              >
+                Cancel
+              </button>
+            )}
             <button
               className="btn-primary"
               onClick={handleConnect}
               disabled={!apiKey.trim() || loading || !backendOnline}
-              style={{ width: '100%' }}
+              style={{ flex: 1 }}
             >
-              {loading ? 'Validating...' : 'Connect'}
+              {loading ? 'Validating...' : connected ? 'Update Key' : 'Connect'}
             </button>
           </div>
           {error && <div className="provider-card-error">{error}</div>}
