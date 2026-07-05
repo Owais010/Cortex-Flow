@@ -15,20 +15,40 @@ router.post("/sync-user", async (req, res) => {
       return res.status(400).json({ error: "user_id and email are required" });
     }
 
-    const { error } = await supabase.from("users").upsert(
-      {
-        id: user_id,
-        email,
-        display_name: display_name || email.split("@")[0],
-        avatar_url: avatar_url || "",
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "id" }
-    );
+    const row = {
+      id: user_id,
+      email,
+      display_name: display_name || email.split("@")[0],
+      avatar_url: avatar_url || "",
+      updated_at: new Date().toISOString(),
+    };
+
+    const { error } = await supabase.from("users").upsert(row, { onConflict: "id" });
 
     if (error) {
+      // 23505 = the email is already stored under a *different* id (e.g. the
+      // Supabase auth user was reset/recreated, so this login carries a new
+      // uuid). The email column need not be unique here — id is the identity
+      // and FK target — so reconcile by pointing the existing email row at the
+      // current id instead of failing the whole login. (The permanent fix is to
+      // drop the unique email constraint; see db/setup.sql.)
+      if (error.code === "23505") {
+        const { error: reErr } = await supabase
+          .from("users")
+          .update(row)
+          .eq("email", email);
+        if (!reErr) return res.json({ success: true, reconciled: true });
+        console.error("Error reconciling user by email:", reErr);
+        return res
+          .status(500)
+          .json({ error: "Failed to sync user", code: reErr.code, detail: reErr.message });
+      }
+
+      // Surface the real Postgres error so this stops being a black box.
       console.error("Error syncing user:", error);
-      return res.status(500).json({ error: "Failed to sync user" });
+      return res
+        .status(500)
+        .json({ error: "Failed to sync user", code: error.code, detail: error.message });
     }
 
     res.json({ success: true });

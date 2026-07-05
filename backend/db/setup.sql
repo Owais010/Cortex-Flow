@@ -93,7 +93,11 @@ CREATE TABLE IF NOT EXISTS users (
   updated_at TIMESTAMPTZ DEFAULT now()
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email
+-- NOTE: email is intentionally NOT unique. `id` (the Supabase auth uuid) is the
+-- identity and the FK target for chat_threads/chat_messages. Making email unique
+-- breaks sync-user when a returning auth user has a regenerated uuid (23505), so
+-- we only index it for lookups.
+CREATE INDEX IF NOT EXISTS idx_users_email
   ON users(email);
 
 -- 7. Chat Threads — durable conversations shown in the sidebar

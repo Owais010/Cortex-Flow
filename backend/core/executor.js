@@ -8,6 +8,89 @@ const vault = require('../security/vault');
 const { computeActualCost } = require('./token_counter');
 const { readContext, writeContext } = require('./memory');
 
+// Longest server-suggested rate-limit delay we're willing to wait inline before
+// giving up on a model and falling back to another. Anything longer would stall
+// the whole execution (and the SSE stream), so we switch models instead.
+const MAX_RETRY_WAIT_MS = Number(process.env.GEMINI_MAX_RETRY_WAIT_MS || 6000);
+
+// Same-provider fallback chain used when a Gemini model is unavailable (404) or
+// rate-limited (429). Ordered cheapest-reliable-first after the pro tier.
+const GEMINI_FALLBACK_MODELS = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-2.5-pro', 'gemini-flash-latest'];
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Extract an HTTP-ish status code and any server-suggested retry delay from a
+ * Google Generative AI SDK error. The SDK surfaces these as text, e.g.
+ * "[429 Too Many Requests] ... "retryDelay":"27s" ... Please retry in 27.7s".
+ */
+function classifyGeminiError(err) {
+  const msg = String(err?.message || '');
+  let status = 0;
+  const statusMatch = msg.match(/\[(\d{3})\s/);
+  if (statusMatch) status = Number(statusMatch[1]);
+  else if (/quota|rate limit|too many requests/i.test(msg)) status = 429;
+  else if (/not found|\b404\b/i.test(msg)) status = 404;
+
+  const jsonDelay = msg.match(/"retryDelay"\s*:\s*"(\d+(?:\.\d+)?)s"/);
+  const textDelay = msg.match(/retry in (\d+(?:\.\d+)?)\s*s/i);
+  const secs = jsonDelay ? Number(jsonDelay[1]) : (textDelay ? Number(textDelay[1]) : 0);
+  const retryDelayMs = Number.isFinite(secs) && secs > 0 ? Math.ceil(secs * 1000) : 0;
+
+  return { status, retryDelayMs };
+}
+
+/**
+ * Generate content with a Gemini model, transparently recovering from a bad/
+ * retired model id (404) or a quota/rate-limit hit (429) by switching to a
+ * sibling Gemini model. For a 429 that carries a short server-suggested delay,
+ * we wait once and retry the same model before falling back. Returns both the
+ * SDK result and the id of the model that actually produced it so the caller
+ * can report/cost the real model.
+ */
+async function generateGeminiContent(genAI, requestedModelId, prompt) {
+  const generateOnce = async (id) => {
+    const model = genAI.getGenerativeModel({ model: id });
+    return model.generateContent(prompt);
+  };
+
+  try {
+    return { result: await generateOnce(requestedModelId), modelUsed: requestedModelId };
+  } catch (err) {
+    const { status, retryDelayMs } = classifyGeminiError(err);
+
+    // Only a retired-model 404 or a quota/rate-limit 429 is recoverable by
+    // switching models. Anything else (auth, bad request, server error) is a
+    // real failure and bubbles up to the cross-model loop in executeSubtask.
+    if (status !== 404 && status !== 429) throw err;
+
+    let lastErr = err;
+
+    // Short rate-limit delay: honor it once for the requested model before
+    // falling back. Long delays are skipped so we don't stall the execution.
+    if (status === 429 && retryDelayMs > 0 && retryDelayMs <= MAX_RETRY_WAIT_MS) {
+      console.warn(`[executor] ${requestedModelId} rate-limited; waiting ${retryDelayMs}ms for one retry...`);
+      await sleep(retryDelayMs);
+      try {
+        return { result: await generateOnce(requestedModelId), modelUsed: requestedModelId };
+      } catch (retryErr) {
+        lastErr = retryErr;
+      }
+    }
+
+    console.warn(`[executor] ${requestedModelId} unavailable (status ${status}); trying Gemini fallbacks...`);
+    for (const fallbackId of GEMINI_FALLBACK_MODELS) {
+      if (fallbackId === requestedModelId) continue;
+      try {
+        return { result: await generateOnce(fallbackId), modelUsed: fallbackId };
+      } catch (e) {
+        lastErr = e;
+      }
+    }
+    throw lastErr;
+  }
+}
+
 async function callLLMProvider(provider, modelId, apiKey, prompt) {
   if (provider === 'anthropic') {
     const client = new Anthropic({ apiKey });
@@ -18,6 +101,7 @@ async function callLLMProvider(provider, modelId, apiKey, prompt) {
     });
     return {
       text: msg.content?.[0]?.text || '',
+      modelUsed: modelId,
       usage: { input_tokens: msg.usage?.input_tokens || 0, output_tokens: msg.usage?.output_tokens || 0 }
     };
   }
@@ -31,41 +115,18 @@ async function callLLMProvider(provider, modelId, apiKey, prompt) {
     });
     return {
       text: res.choices?.[0]?.message?.content || '',
+      modelUsed: modelId,
       usage: { input_tokens: res.usage?.prompt_tokens || 0, output_tokens: res.usage?.completion_tokens || 0 }
     };
   }
 
   if (provider === 'google_gemini') {
     const genAI = new GoogleGenerativeAI(apiKey);
-    let result;
-    try {
-      const model = genAI.getGenerativeModel({ model: modelId });
-      result = await model.generateContent(prompt);
-    } catch (err) {
-      if (err.message.includes('404')) {
-        console.warn(`[executor] ${modelId} returned 404. Attempting automatic fallbacks...`);
-        const fallbacks = ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-2.0-flash', 'gemini-flash-latest'];
-        let success = false;
-        let lastErr = err;
-        for (const fallbackId of fallbacks) {
-          if (fallbackId === modelId) continue;
-          try {
-            const fbModel = genAI.getGenerativeModel({ model: fallbackId });
-            result = await fbModel.generateContent(prompt);
-            success = true;
-            break;
-          } catch (e) {
-            lastErr = e;
-          }
-        }
-        if (!success) throw lastErr;
-      } else {
-        throw err;
-      }
-    }
+    const { result, modelUsed } = await generateGeminiContent(genAI, modelId, prompt);
 
     return {
       text: result.response.text() || '',
+      modelUsed,
       usage: {
         input_tokens: result.response.usageMetadata?.promptTokenCount || 0,
         output_tokens: result.response.usageMetadata?.candidatesTokenCount || 0
@@ -93,12 +154,16 @@ async function executeSubtask(subtask, availableModels, keyMap, category) {
 
     try {
       const result = await callLLMProvider(provider, modelId, apiKey, subtask.prompt);
-      const actualCost = computeActualCost(modelId, result.usage);
+      // The provider may have transparently switched models (e.g. Gemini
+      // same-provider fallback on 404/429). Report and cost the model that
+      // actually produced the output, not the one we asked for.
+      const modelUsed = result.modelUsed || modelId;
+      const actualCost = computeActualCost(modelUsed, result.usage);
 
       return {
         subtaskId: subtask.id,
-        modelUsed: modelId,
-        wasFallback: modelId !== subtask.assignedModel,
+        modelUsed,
+        wasFallback: modelUsed !== subtask.assignedModel,
         output: result.text,
         inputTokens: result.usage.input_tokens,
         outputTokens: result.usage.output_tokens,

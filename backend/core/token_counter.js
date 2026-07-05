@@ -1,14 +1,23 @@
 const config = require('../config');
 const supabase = require('../db/supabase');
 
+// Keep in sync with the active models in migrate_models_2026.js. Fallback now
+// routes to any active model, so a missing entry here silently over-charges via
+// FALLBACK_PRICE and corrupts the daily spend cap. Legacy 1.5 ids are retained
+// so historical executions still price correctly.
 const PRICING = {
   'gpt-4o': { inputPer1k: 0.0050, outputPer1k: 0.0150, speed: 40 },
   'gpt-4o-mini': { inputPer1k: 0.00015, outputPer1k: 0.0006, speed: 80 },
+  'gpt-4.1': { inputPer1k: 0.0100, outputPer1k: 0.0300, speed: 35 },
+  'claude-sonnet-4-20250514': { inputPer1k: 0.0030, outputPer1k: 0.0150, speed: 50 },
   'claude-3-5-sonnet-20241022': { inputPer1k: 0.0030, outputPer1k: 0.0150, speed: 50 },
+  'claude-3-5-haiku-20241022': { inputPer1k: 0.0008, outputPer1k: 0.0040, speed: 90 },
   'claude-3-haiku-20240307': { inputPer1k: 0.00025, outputPer1k: 0.00125, speed: 90 },
+  'gemini-2.5-pro': { inputPer1k: 0.00125, outputPer1k: 0.0100, speed: 45 },
+  'gemini-2.5-flash': { inputPer1k: 0.000075, outputPer1k: 0.0003, speed: 100 },
+  'gemini-2.0-flash': { inputPer1k: 0.0001, outputPer1k: 0.0004, speed: 110 },
   'gemini-1.5-pro': { inputPer1k: 0.00125, outputPer1k: 0.0050, speed: 45 },
   'gemini-1.5-flash': { inputPer1k: 0.000075, outputPer1k: 0.0003, speed: 100 },
-  'gemini-2.0-flash': { inputPer1k: 0.0001, outputPer1k: 0.0004, speed: 110 },
 };
 
 const FALLBACK_PRICE = { inputPer1k: 0.0025, outputPer1k: 0.0100, speed: 40 };
